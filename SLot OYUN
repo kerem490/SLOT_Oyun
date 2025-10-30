@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Slot Oyunu 🎰</title>
+<style>
+  body { font-family: sans-serif; text-align: center; background: #222; color: #fff; }
+  h1 { margin-top: 30px; }
+  .slot {
+    font-size: 3rem;
+    margin: 20px;
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+  }
+  button {
+    font-size: 1.2rem;
+    padding: 10px 20px;
+    background: #ff9800;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  button:hover { background: #e68900; }
+  .result { margin-top: 20px; font-size: 1.5rem; }
+</style>
+</head>
+<body>
+  <h1>🎰 Slot Oyunu 🎰</h1>
+  <div class="slot" id="slot">🍒 🍋 🍇</div>
+  <button onclick="spin()">Çevir!</button>
+  <div class="result" id="result"></div>
+
+  <script>
+    const icons = ["🍒","🍋","🍇","🍉","⭐","💎"];
+    function spin() {
+      const s = document.getElementById("slot");
+      const r = document.getElementById("result");
+      const a = icons[Math.floor(Math.random() * icons.length)];
+      const b = icons[Math.floor(Math.random() * icons.length)];
+      const c = icons[Math.floor(Math.random() * icons.length)];
+      s.textContent = `${a} ${b} ${c}`;
+      if (a === b && b === c) {
+        r.textContent = "🎉 JACKPOT! Kazandın!";
+      } else if (a === b || b === c || a === c) {
+        r.textContent = "😎 Neredeyse! Küçük ödül!";
+      } else {
+        r.textContent = "😢 Şansını tekrar dene!";
+      }
+    }
+  </script>
+</body>
+</html>
