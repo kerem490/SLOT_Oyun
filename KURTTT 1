@@ -155,11 +155,6 @@ function ensurePet(player) {
   }
 }
 
-/* Pet tavanları */
-const PET_MAX_LEVEL = 20;
-const PET_MAX_ATK   = 15; // "atak güçleri maksimum" cevabı bu: 15
-const PET_MAX_LUCK  = 15;
-
 const PET_SHOP = {
   kedi: {
     key: "kedi",
@@ -187,24 +182,6 @@ const PET_SHOP = {
     atk: 5,
     luck: 5,
     desc: "Efsane pet. Hem yüksek kazanç hem ekstra şans sağlar."
-  },
-  tavsan: {
-    key: "tavsan",
-    emoji: "🐰",
-    label: "Tavşan",
-    price: 3000,
-    atk: 1,
-    luck: 3,
-    desc: "Hızlı ve şanslı, kutu ve drop odaklı bir pet."
-  },
-  tilki: {
-    key: "tilki",
-    emoji: "🦊",
-    label: "Tilki",
-    price: 5000,
-    atk: 2,
-    luck: 3,
-    desc: "Kurnaz, dengeli bir pet. Hem hunt hem kutu için iyi."
   }
 };
 
@@ -222,49 +199,7 @@ function petTypeFromInput(raw) {
   if (["kedi","cat","pisi"].includes(t)) return "kedi";
   if (["kopek","köpek","kope","dog"].includes(t)) return "kopek";
   if (["ejder","ejderha","dragon"].includes(t)) return "ejderha";
-  if (["tavsan","tavşan","rabbit","bunny"].includes(t)) return "tavsan";
-  if (["tilki","fox"].includes(t)) return "tilki";
   return null;
-}
-
-/* Pet XP / Level sistemi */
-function gainPetXP(player, amount, msg) {
-  if (!player.pet || amount <= 0) return;
-  const pet = player.pet;
-
-  if (typeof pet.level !== "number" || pet.level < 1) pet.level = 1;
-  if (typeof pet.xp !== "number" || pet.xp < 0) pet.xp = 0;
-  if (typeof pet.atk !== "number") pet.atk = 0;
-  if (typeof pet.luck !== "number") pet.luck = 0;
-
-  pet.xp += amount;
-
-  const xpForLevel = (lvl) => 40 + (lvl - 1) * 20; // seviye arttıkça XP ihtiyacı artar
-
-  let leveled = false;
-  const startLevel = pet.level;
-
-  while (pet.level < PET_MAX_LEVEL) {
-    const need = xpForLevel(pet.level);
-    if (pet.xp < need) break;
-    pet.xp -= need;
-    pet.level += 1;
-    leveled = true;
-
-    if (pet.atk < PET_MAX_ATK) pet.atk += 1;
-    if (pet.level % 2 === 0 && pet.luck < PET_MAX_LUCK) pet.luck += 1;
-  }
-
-  if (leveled && msg) {
-    msg.reply(
-`🐾 *Pet Seviyesi Arttı!*
-Pet: ${pet.name || pet.type}
-Eski seviye: ${startLevel}
-Yeni seviye: ${pet.level}
-ATK: ${pet.atk}
-LUCK: ${pet.luck}`
-    ).catch(() => {});
-  }
 }
 
 /* --- Rastgele görev havuzu --- */
@@ -494,7 +429,6 @@ Amaç: çip biriktirmek, oyunlar oynayıp kazanmak, günlük görevleri tamamlay
 🎮 *Temel Komutlar*
 • .join — Oyuna katıl, başlangıç çipini al
 • .bakiye — Bakiyeni ve aktif unvanını gör
-• .profil — Profilini, istatistiklerini, petini ve unvanını gör
 • .günlük — Günlük çip ödülünü al
 • .slot <miktar> — Slot makinesi oynarsın
 • .rulet <miktar> <seçim> — Rulet oynarsın (örn: .rulet 100 kırmızı)
@@ -507,17 +441,13 @@ Amaç: çip biriktirmek, oyunlar oynayıp kazanmak, günlük görevleri tamamlay
 • .owo — Bu rehberi tekrar gösterir
 
 🐾 *Pet Sistemi*
-Petler:
 • .pet al kedi
 • .pet al kopek
-• .pet al tavsan
-• .pet al tilki
 • .pet al ejderha
 
 Her petin kendine ait:
 • ATK: Hunt kazancını artırır
 • LUCK: Hunt kutu düşme ihtimalini ve kutu ödüllerini hafif bufflar
-• Seviye: Hunt / kutu yaptıkça XP kazanır, seviye atlayınca ATK/LUCK yükselir (tavan: ATK 15)
 
 • .pet — Petini ve özelliklerini görürsün
 • .pet isim <yeni_ad> — Petine isim verirsin (sadece görünüş amaçlı)
@@ -557,7 +487,7 @@ Her gün:
 3) .slot / .rulet / .bj / .hunt ile oyna
 4) .kutu ile kutuları aç
 5) .görev ile görevlerini takip et
-6) .pet al ile pet sahibi ol, XP kasarak petini güçlendir
+6) .pet al ile pet sahibi ol, buff kasa
 7) .unvan ile havalı unvanını seç 😎`;
 
 /* ==================== Oyuncu yapısı ==================== */
@@ -801,7 +731,6 @@ function buildHelpText(isAdmin) {
 `♣️ *Komutlar*
 • .join — Oyuna katıl
 • .bakiye — Bakiyeni gösterir
-• .profil — Profilini ve istatistiklerini gösterir
 • .günlük — Günlük ödül
 • .score — Skor tablosu
 • .slot <miktar> — Slot
@@ -1158,7 +1087,6 @@ Kapatmak için: .eventbuff off`
 Pet alarak:
 • .hunt kazancına (ATK) bonus alırsın
 • Kutularda ve hunt kutu düşme şansında (LUCK) küçük buff kazanırsın
-• Hunt / kutu yaptıkça pet XP kazanır, seviye atlayıp güçlenir (ATK/LUCK artar, tavan ATK ${PET_MAX_ATK})
 
 📦 *Pet Shop*
 ${shopLines}${adminLine}
@@ -1168,8 +1096,6 @@ Pet almak için:
 Örn:
 • .pet al kedi
 • .pet al kopek
-• .pet al tavsan
-• .pet al tilki
 • .pet al ejderha`
           );
         } else {
@@ -1237,8 +1163,6 @@ Bu peti sadece adminler alabilir.
 Mevcut türler:
 • kedi
 • kopek
-• tavsan
-• tilki
 • ejderha
 
 Örnek:
@@ -1253,8 +1177,6 @@ Mevcut türler:
 Kullanım:
 • .pet al kedi
 • .pet al kopek
-• .pet al tavsan
-• .pet al tilki
 • .pet al ejderha`
           );
         }
@@ -1282,15 +1204,12 @@ Kullanım:
 Artık bir petin var:
 Adı: ${cfg.label}
 Tür: ${cfg.label}
-Seviye: 1
-XP: 0
 ATK: ${cfg.atk}
 LUCK: ${cfg.luck}
 
 Petin:
 • .hunt kazancını artırır
 • Kutulardaki ödüle ufak bonus ekler
-• Oynadıkça XP kazanıp seviye atlar (ATK/LUCK yükselir, tavan ATK ${PET_MAX_ATK})
 
 İsim vermek için:
 .pet isim <yeni_isim>
@@ -1320,7 +1239,7 @@ Petin:
       return msg.reply(
 `🐾 Pet komutları:
 • .pet — Pet durumunu göster
-• .pet al <tür> — Pet satın al (kedi / kopek / tavsan / tilki / ejderha)
+• .pet al <tür> — Pet satın al (kedi / kopek / ejderha)
 • .pet adminkurt — (Sadece admin) özel Alfa Kurt peti
 • .pet isim <yeni_isim> — Petine isim ver`
       );
@@ -1425,64 +1344,6 @@ Skor tablosunda görünürsün. Bol şans!`
         titleLine +
         `${player.joined ? "" : "\nℹ️ Skor tablosuna girmek için \`.join\` yaz."}`
       );
-    }
-
-    /* ---------- PROFİL (.profil) ---------- */
-    if (base === ".profil" || base === ".profile") {
-      if (!(await requireJoined(msg, player))) return;
-
-      ensureStats(player);
-      ensureInventory(player);
-      ensurePet(player);
-      ensureTitles(player);
-
-      const activeTitle = getActiveTitleName(player) || "Yok";
-      const stats = player.stats || {};
-      const inv = player.inv || { boxes: 0 };
-      const pet = player.pet;
-
-      const petLine = !pet
-        ? "Pet: Yok"
-        : `Pet: ${pet.name || pet.type} (Seviye ${pet.level || 1}, ATK ${pet.atk || 0}, LUCK ${pet.luck || 0})`;
-
-      const qState = player.quests || {};
-      const ak = qState.activeKeys || [];
-      const completedCount = ak.filter(k => qState.completed && qState.completed[k]).length;
-
-      const buffStatus = isEventBuffActive()
-        ? `Açık (Kalan: ${eventBuffRemainingText()})`
-        : "Kapalı";
-
-      const text =
-`👤 *Profilin*
-
-Ad: ${player.name || "-"}
-Unvan: ${activeTitle}
-Katılım: ${player.joined ? "Evet" : "Hayır"}
-🏦 Bakiye: ${player.stack} çip
-
-🎮 *Oyun İstatistikleri*
-• Slot: ${stats.slotGames} oyun, Net: ${stats.slotNetWin >= 0 ? "+" : ""}${stats.slotNetWin}
-• Rulet: ${stats.rouletteGames} oyun (Kazanma: ${stats.rouletteWins}, Kaybetme: ${stats.rouletteLosses})
-• Blackjack: ${stats.bjGames} el (Kazanma: ${stats.bjWins}, Kaybetme: ${stats.bjLosses})
-• Hunt: ${stats.huntCount} kez, Toplam kazanç: ${stats.huntProfit >= 0 ? "+" : ""}${stats.huntProfit}
-• Günlük ödül alınan gün: ${stats.dailyDays}
-• Açılan kutu sayısı: ${stats.boxesOpened}
-
-📜 *Görev Durumu*
-• Bugünkü görev sayısı: ${ak.length || 0}
-• Tamamlanan görev: ${completedCount}
-
-📦 *Envanter*
-• Kutu: ${inv.boxes}
-
-🐾 *Pet*
-• ${petLine}
-
-⚡ *Etkinlik Buff*
-• ${buffStatus}`;
-
-      return msg.reply(text);
     }
 
     // .score
@@ -1963,7 +1824,7 @@ ${result}`
 💵 *Bahis:* ${game.bet} 💰
 🏦 *Bakiye:* ${player.stack} 💰
 
-💸 *Kayıp:* -${loss}``
+💸 *Kayıp:* -${loss}`
       );
     }
 
@@ -2071,9 +1932,6 @@ ${result}`
 
       applyQuestProgress(player, "huntTimes", 1);
 
-      // Pet XP (hunt)
-      gainPetXP(player, 10, msg);
-
       await saveDB();
       await checkAndUnlockTitles(msg, player);
 
@@ -2146,9 +2004,6 @@ Kazanç: +${gain} çip${extra}
       player.stack += reward;
       player.stats.boxesOpened += 1;
       applyQuestProgress(player, "boxOpen", 1);
-
-      // Pet XP (kutu)
-      gainPetXP(player, 5, msg);
 
       await saveDB();
       await checkAndUnlockTitles(msg, player);
@@ -2370,3 +2225,4 @@ async function adminSendFunds(msg, senderPlayer, rawArgs, isAdmin) {
 
   setTimeout(() => DONE_TX.delete(txKey), 60_000);
 }
+
