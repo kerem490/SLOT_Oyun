@@ -2380,16 +2380,12 @@ Kazanç: +${gain} çip${extra}
           let reward = 0;
 
           if (roll < 0.05) {
-            reward = randInt(800, 1500);
-            epicCount++;
-          } else if (roll < 0.25) {
-            reward = randInt(300, 600);
-            goodCount++;
-          } else {
-            reward = randInt(50, 200);
-            smallCount++;
-          }
-
+  reward = randInt(1600, 3000);    // Efsane (2x)
+} else if (roll < 0.25) {
+  reward = randInt(600, 1200);     // Orta (2x)
+} else {
+  reward = randInt(100, 400);      // Küçük (2x)
+}
           const petLuck = petPower.luck || 0;
           let petBonus = 0;
           if (petLuck > 0) {
