@@ -1,0 +1,18 @@
+    /* === Günlük ödül (otomatik, ilk mesajda) === */
+    try {
+      if (player.joined) {
+        const todayKey = localDateKey();
+        if (player.lastDaily !== todayKey) {
+          player.lastDaily = todayKey;
+          player.stack += DAILY_REWARD;
+          ensureStats(player);
+          player.stats.dailyDays = (player.stats.dailyDays || 0) + 1;
+          applyQuestProgress(player, "dailyClaim", 1);
+          await saveDB();
+          try {
+            await msg.reply(`🎁 *Günlük ödül (otomatik):* +${DAILY_REWARD}\n🏦 Bakiye: ${player.stack}`);
+          } catch {}
+          await checkAndUnlockTitles(msg, player);
+        }
+      }
+    } catch {}
