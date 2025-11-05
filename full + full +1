@@ -491,37 +491,37 @@ const QUEST_POOL = [
     key: "slotPlay",
     desc: "Bugün en az 3 kez slot oyna",
     target: 3,
-    reward: { chips: 200 }
+    reward: { chips: 3000 }
   },
   {
     key: "rouletteWin",
     desc: "Bugün rulette 1 kez kazan",
     target: 1,
-    reward: { chips: 300 }
+    reward: { chips: 4500 }
   },
   {
     key: "bjPlay",
     desc: "Bugün 2 el blackjack oyna",
     target: 2,
-    reward: { chips: 250 }
+    reward: { chips: 3750 }
   },
   {
     key: "dailyClaim",
     desc: "Bugünkü günlük ödülünü al",
     target: 1,
-    reward: { chips: 100 }
+    reward: { chips: 1750 }
   },
   {
     key: "huntTimes",
     desc: "Bugün 5 kez .hunt yap",
     target: 5,
-    reward: { chips: 250 }
+    reward: { chips: 3750 }
   },
   {
     key: "boxOpen",
     desc: "Bugün 2 kutu aç",
     target: 2,
-    reward: { chips: 300 }
+    reward: { chips: 4500 }
   }
 ];
 
@@ -1227,8 +1227,8 @@ function isAdminCheck(sender) {
   return false;
 }
 
-/* ===== Hunt cooldown (9 saniye) ===== */
-const HUNT_COOLDOWN_MS = 9000;
+/* ===== Hunt cooldown (3 saniye) ===== */
+const HUNT_COOLDOWN_MS = 3000;
 const lastHuntTimes = {}; // keyId -> ms
 
 /* ===== Kutu özel pet drop oranları ===== */
