@@ -41,7 +41,8 @@ if (!db.data) db.data = { players: {} };
 
 const STARTING_STACK = parseInt(process.env.STARTING_STACK || "100", 10);
 const MIN_BET = parseInt(process.env.MIN_BET || "5", 10);
-const DAILY_REWARD = parseInt(process.env.DAILY_REWARD || "5000", 10);
+// 🔹 GÜNLÜK ÖDÜL ARTIRILDI: 2500
+const DAILY_REWARD = parseInt(process.env.DAILY_REWARD || "2500", 10);
 const AUTO_TOPUP = parseInt(process.env.AUTO_TOPUP || "3000", 10);
 
 /* ==== Admin yapılandırma (.env + kalıcı dosya) ==== */
@@ -491,37 +492,37 @@ const QUEST_POOL = [
     key: "slotPlay",
     desc: "Bugün en az 3 kez slot oyna",
     target: 3,
-    reward: { chips: 200 }
+    reward: { chips: 3000 }
   },
   {
     key: "rouletteWin",
     desc: "Bugün rulette 1 kez kazan",
     target: 1,
-    reward: { chips: 300 }
+    reward: { chips: 4500 }
   },
   {
     key: "bjPlay",
     desc: "Bugün 2 el blackjack oyna",
     target: 2,
-    reward: { chips: 250 }
+    reward: { chips: 3750 }
   },
   {
     key: "dailyClaim",
     desc: "Bugünkü günlük ödülünü al",
     target: 1,
-    reward: { chips: 100 }
+    reward: { chips: 1750 }
   },
   {
     key: "huntTimes",
     desc: "Bugün 5 kez .hunt yap",
     target: 5,
-    reward: { chips: 250 }
+    reward: { chips: 3750 }
   },
   {
     key: "boxOpen",
     desc: "Bugün 2 kutu aç",
     target: 2,
-    reward: { chips: 300 }
+    reward: { chips: 4500 }
   }
 ];
 
@@ -721,7 +722,7 @@ Amaç: çip biriktirmek, oyunlar oynayıp kazanmak, günlük görevleri tamamlay
 • .kutu — Elindeki kutuları aç
 • .kutu all — Tüm kutuları tek seferde aç
 • .görev — Bugüne özel rastgele 3 görevi gösterir
-• .unvan — Sahip olduğun unvanları listele / seç
+• .unvan — Unvanlarını listele / seç
 • .pet — Pet sistemini ve petini yönet
 • .owo — Bu rehberi tekrar gösterir
 
@@ -1055,7 +1056,7 @@ function buildHelpText(isAdmin) {
 • .slot <miktar> — Slot
 • .bj <miktar> | .bj bet <miktar> — Blackjack
 • .rulet <miktar> <seçim> — Rulet (örn: .rulet 100 kırmızı)
-• .hunt — Avlan, çip ve kutu kazan (9 sn bekleme)
+• .hunt — Avlan, çip ve kutu kazan (6 sn bekleme)
 • .kutu — Elindeki kutuları aç
 • .kutu all — Tüm kutuları tek seferde aç
 • .görev — Günlük rastgele görevlerini gösterir
@@ -1227,8 +1228,8 @@ function isAdminCheck(sender) {
   return false;
 }
 
-/* ===== Hunt cooldown (9 saniye) ===== */
-const HUNT_COOLDOWN_MS = 9000;
+/* ===== Hunt cooldown (3 saniye) ===== */
+const HUNT_COOLDOWN_MS = 3000;
 const lastHuntTimes = {}; // keyId -> ms
 
 /* ===== Kutu özel pet drop oranları ===== */
@@ -1274,6 +1275,8 @@ async function handleMessageSafe(msg) {
 
     const keyId = s.phoneId || s.lid || (msg.author || msg.from);
     const player = getPlayer(keyId, name);
+
+    // 🔹 Otomatik günlük ödül BLOĞU TAMAMEN SİLİNDİ
 
     /* Otomatik destek */
     if (player.stack <= 0) {
@@ -1681,27 +1684,63 @@ Skor tablosunda görünürsün. Bol şans!`
       ensureStats(player);
       ensureInventory(player);
       ensurePet(player);
-      const tname = getActiveTitleName(player);
-      const petCount = (player.pets || []).length;
-      const specialCount = (player.pets || []).filter(p => ["kaplumbaga","salyangoz","koala"].includes(p.type)).length;
+      ensureQuests(player);
+
+      const activeTitleName = getActiveTitleName(player) || "Yok";
+
+      // Aktif pet metni
+      let activePetText = "Yok";
+      if (player.pet) {
+        const petType = player.pet.type || "-";
+        const petName = player.pet.name || petType;
+        activePetText = `${petName} (${petType})`;
+      }
+
+      // Görev satırları
+      const qState = player.quests;
+      let questLines = [];
+      if (qState && Array.isArray(qState.activeKeys) && qState.activeKeys.length) {
+        questLines = qState.activeKeys
+          .map((key) => {
+            const def = QUEST_POOL.find((q) => q.key === key);
+            if (!def) return null;
+            const prog = (qState.progress && qState.progress[key]) || 0;
+            const done = !!(qState.completed && qState.completed[key]);
+            const status = done ? "✅" : `⏳ ${prog}/${def.target}`;
+            return `• ${def.desc} — ${status}`;
+          })
+          .filter(Boolean);
+      }
+
+      const questsText = questLines.length
+        ? questLines.join("\n")
+        : "• Bugün için görev bulunamadı. Detay için .görev yaz.";
 
       return msg.reply(
-`👤 *Profilin*
+`👤 *Profil Bilgileri*
 
-İsim: ${player.name || "-"}
-Joined: ${player.joined ? "Evet" : "Hayır"}
-🏦 Bakiye: ${player.stack} çip
-🎖 Aktif Unvan: ${tname || "Yok"}
-🐾 Pet Sayısı: ${petCount} (Özel: ${specialCount})
-🎁 Kutu: ${(player.inv?.boxes || 0)}
+Ad: ${player.name || "-"}
+🏦 Bakiye: ${player.stack}
+🎖 Aktif Unvan: ${activeTitleName}
+🐾 Aktif Pet: ${activePetText}
 
-📊 *İstatistikler*
-• Slot oyunları: ${player.stats.slotGames} (Net kazanç: ${player.stats.slotNetWin})
-• Rulet: ${player.stats.rouletteGames} (Kazanma: ${player.stats.rouletteWins}, Kaybetme: ${player.stats.rouletteLosses})
-• Blackjack: ${player.stats.bjGames} (Win: ${player.stats.bjWins}, Lose: ${player.stats.bjLosses})
-• Hunt: ${player.stats.huntCount} (Toplam kazanç: ${player.stats.huntProfit})
+📊 *Genel İstatistikler*
+• Slot oyunları: ${player.stats.slotGames}
+• Slot net kazanç: ${player.stats.slotNetWin}
+• Rulet galibiyetleri: ${player.stats.rouletteWins}/${player.stats.rouletteGames}
+• BJ galibiyetleri: ${player.stats.bjWins}/${player.stats.bjGames}
+• Hunt sayısı: ${player.stats.huntCount}
 • Açılan kutu: ${player.stats.boxesOpened}
-• Günlük ödül aldığın gün sayısı: ${player.stats.dailyDays}`
+• Günlük alınan gün sayısı: ${player.stats.dailyDays}
+
+📜 *Bugünkü Görevler*
+${questsText}
+
+🔹 Komutlar:
+• .bakiye — Sadece bakiyeni gör
+• .görev — Görev detaylarını ayrı göster
+• .unvan — Unvanlarını yönet
+• .pet — Pet detayları`
       );
     }
 
@@ -2191,11 +2230,11 @@ ${result}`
 
 ⚡ *Hareket:* 🏳️ Oyun Bitti
 
-🃏 *Dağıtıcı:* —
-📊 *Değer:* —
+🃏 *Dağıtıcı:* — 
+📊 *Değer:* — 
 
-👤 *.:* —
-📊 *Değer:* —
+👤 *.:* — 
+📊 *Değer:* — 
 
 💵 *Bahis:* ${game.bet} 💰
 🏦 *Bakiye:* ${player.stack} 💰
@@ -2521,7 +2560,7 @@ Kalan kutu: ${player.inv.boxes}
       );
     }
 
-    /* ==================== Slot & JACKPOT ==================== */
+    /* ==================== Slot & Jackpot ==================== */
     if (base === ".slot") {
       const bet = parseInt(args[1], 10);
       if (!Number.isFinite(bet) || bet < MIN_BET) return msg.reply(`⚠️ Minimum bahis ${MIN_BET}`);
@@ -2640,7 +2679,7 @@ ${info}
       );
     }
 
-    /* ==================== Günlük ödül (manuel komut) ==================== */
+    /* ==================== Günlük ödül (MANUEL) ==================== */
     if (base === ".günlük" || base === ".gunluk" || base === ".daily") {
       if (!(await requireJoined(msg, player))) return;
       const key = localDateKey();
