@@ -1696,31 +1696,68 @@ Skor tablosunda görünürsün. Bol şans!`
     }
 
     /* ==================== PROFİL ==================== */
+    /* ==================== PROFİL ==================== */
     if (base === ".profil" || base === ".profile") {
       ensureStats(player);
       ensureInventory(player);
       ensurePet(player);
-      const tname = getActiveTitleName(player);
-      const petCount = (player.pets || []).length;
-      const specialCount = (player.pets || []).filter(p => ["kaplumbaga","salyangoz","koala"].includes(p.type)).length;
+      ensureQuests(player);
+
+      const activeTitleName = getActiveTitleName(player) || "Yok";
+
+      // Aktif pet metni
+      let activePetText = "Yok";
+      if (player.pet) {
+        const petType = player.pet.type || "-";
+        const petName = player.pet.name || petType;
+        activePetText = `${petName} (${petType})`;
+      }
+
+      // Görev satırları
+      const qState = player.quests;
+      let questLines = [];
+      if (qState && Array.isArray(qState.activeKeys) && qState.activeKeys.length) {
+        questLines = qState.activeKeys
+          .map((key) => {
+            const def = QUEST_POOL.find((q) => q.key === key);
+            if (!def) return null;
+            const prog = (qState.progress && qState.progress[key]) || 0;
+            const done = !!(qState.completed && qState.completed[key]);
+            const status = done ? "✅" : `⏳ ${prog}/${def.target}`;
+            return `• ${def.desc} — ${status}`;
+          })
+          .filter(Boolean);
+      }
+
+      const questsText = questLines.length
+        ? questLines.join("\n")
+        : "• Bugün için görev bulunamadı. Detay için .görev yaz.";
 
       return msg.reply(
-`👤 *Profilin*
+`👤 *Profil Bilgileri*
 
-İsim: ${player.name || "-"}
-Joined: ${player.joined ? "Evet" : "Hayır"}
-🏦 Bakiye: ${player.stack} çip
-🎖 Aktif Unvan: ${tname || "Yok"}
-🐾 Pet Sayısı: ${petCount} (Özel: ${specialCount})
-🎁 Kutu: ${(player.inv?.boxes || 0)}
+Ad: ${player.name || "-"}
+🏦 Bakiye: ${player.stack}
+🎖 Aktif Unvan: ${activeTitleName}
+🐾 Aktif Pet: ${activePetText}
 
-📊 *İstatistikler*
-• Slot oyunları: ${player.stats.slotGames} (Net kazanç: ${player.stats.slotNetWin})
-• Rulet: ${player.stats.rouletteGames} (Kazanma: ${player.stats.rouletteWins}, Kaybetme: ${player.stats.rouletteLosses})
-• Blackjack: ${player.stats.bjGames} (Win: ${player.stats.bjWins}, Lose: ${player.stats.bjLosses})
-• Hunt: ${player.stats.huntCount} (Toplam kazanç: ${player.stats.huntProfit})
+📊 *Genel İstatistikler*
+• Slot oyunları: ${player.stats.slotGames}
+• Slot net kazanç: ${player.stats.slotNetWin}
+• Rulet galibiyetleri: ${player.stats.rouletteWins}/${player.stats.rouletteGames}
+• BJ galibiyetleri: ${player.stats.bjWins}/${player.stats.bjGames}
+• Hunt sayısı: ${player.stats.huntCount}
 • Açılan kutu: ${player.stats.boxesOpened}
-• Günlük ödül aldığın gün sayısı: ${player.stats.dailyDays}`
+• Günlük alınan gün sayısı: ${player.stats.dailyDays}
+
+📜 *Bugünkü Görevler*
+${questsText}
+
+🔹 Komutlar:
+• .bakiye — Sadece bakiyeni gör
+• .görev — Görev detaylarını ayrı göster
+• .unvan — Unvanlarını yönet
+• .pet — Pet detayları`
       );
     }
 
@@ -2192,7 +2229,7 @@ ${result}`
       );
     }
 
-    if (base === ".sur") {
+      if (base === ".sur") {
       const game = games[makeGameKey(msg, s)];
       if (!game) return;
       if (player.locked) return msg.reply("🔒 Hesabın kilitli.");
@@ -2211,11 +2248,11 @@ ${result}`
 
 ⚡ *Hareket:* 🏳️ Oyun Bitti
 
-🃏 *Dağıtıcı:* —
-📊 *Değer:* —
+🃏 *Dağıtıcı:* — 
+📊 *Değer:* — 
 
-👤 *.:* —
-📊 *Değer:* —
+👤 *.:* — 
+📊 *Değer:* — 
 
 💵 *Bahis:* ${game.bet} 💰
 🏦 *Bakiye:* ${player.stack} 💰
@@ -2223,6 +2260,7 @@ ${result}`
 💸 *Kayıp:* -${loss}`
       );
     }
+
 
     if (base === ".stand") {
       const game = games[makeGameKey(msg, s)];
