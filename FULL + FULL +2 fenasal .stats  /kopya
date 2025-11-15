@@ -39,52 +39,20 @@ await (async () => {
 })();
 if (!db.data) db.data = { players: {} };
 
-const STARTING_STACK = parseInt(process.env.STARTING_STACK || "100", 10);
-const MIN_BET = parseInt(process.env.MIN_BET || "5", 10);
-const DAILY_REWARD = parseInt(process.env.DAILY_REWARD || "2500", 10); // GÜNLÜK ÖDÜL 2500
-const AUTO_TOPUP = parseInt(process.env.AUTO_TOPUP || "3000", 10);
+async function saveDB() {
+  await db.write();
+}
 
-/* ==== Kristal Sistemi ve Profil Temaları ==== */
-const CRYSTAL_TO_CHIP_RATE = parseInt(process.env.CRYSTAL_TO_CHIP_RATE || "500", 10); 
-// 1 kristal = 500 çip
+/* ==================== Ayarlar ==================== */
+const STARTING_STACK = parseInt(process.env.STARTING_STACK || "10000", 10);
+const MIN_BET        = parseInt(process.env.MIN_BET || "100", 10);
+const DAILY_REWARD   = parseInt(process.env.DAILY_REWARD || "2500", 10);
+const AUTO_TOPUP     = parseInt(process.env.AUTO_TOPUP || "3000", 10);
 
-const CRYSTAL_DROP_BASE = parseFloat(process.env.CRYSTAL_DROP_BASE || "0.05");   // %5
-const CRYSTAL_DROP_EVENT = parseFloat(process.env.CRYSTAL_DROP_EVENT || "0.10"); // %10
-const CRYSTAL_MIN = 1;
-const CRYSTAL_MAX = 3;
+// 1 kristal = şu kadar çip
+const CRYSTAL_TO_CHIP = parseInt(process.env.CRYSTAL_TO_CHIP || "50000", 10);
 
-const PROFILE_SKINS = {
-  default: {
-    key: "default",
-    name: "Standart Profil",
-    rarity: "Sıradan",
-    crystalPrice: 0,
-    adminOnly: false
-  },
-  neon: {
-    key: "neon",
-    name: "Neon Oyuncu",
-    rarity: "Nadir",
-    crystalPrice: 80,
-    adminOnly: false
-  },
-  mythic: {
-    key: "mythic",
-    name: "Efsane Gösteriş",
-    rarity: "Efsanevi",
-    crystalPrice: 150,
-    adminOnly: false
-  },
-  admin_throne: {
-    key: "admin_throne",
-    name: "👑 Yönetici Tahtı",
-    rarity: "Admin",
-    crystalPrice: 0,
-    adminOnly: true
-  }
-};
-
-/* ==== Admin yapılandırma (.env + kalıcı dosya) ==== */
+/* ==== Admin yapılandırma ==== */
 const ADMIN_PIN = (process.env.ADMIN_PIN || "1234").trim();
 const ADMIN_PHONES = (process.env.ADMIN_PHONES || process.env.ADMIN_PHONE || "")
   .split(",")
@@ -109,12 +77,9 @@ function writeAdmins(obj) {
 function localDateKey(ms = Date.now(), tz = "Europe/Istanbul") {
   return new Date(ms).toLocaleDateString("tr-TR", { timeZone: tz });
 }
-async function saveDB() { await db.write(); }
-
 function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
-
 function normalizeTR(s) {
   return (s || "")
     .toLowerCase()
@@ -126,35 +91,16 @@ function normalizeTR(s) {
     .replace(/ğ/g, "g")
     .trim();
 }
-
-/* ===== Global Event Buff (admin etkinliği) ===== */
-let eventBuff = {
-  active: false,
-  until: 0
-};
-
-function isEventBuffActive() {
-  if (!eventBuff.active) return false;
-  if (Date.now() >= eventBuff.until) {
-    eventBuff.active = false;
-    eventBuff.until = 0;
-    return false;
-  }
+const SEEN = new Set();
+function shouldProcess(msg) {
+  const key = msg?.id?._serialized || msg?.id?.id || `${msg.timestamp}:${msg.from}`;
+  if (SEEN.has(key)) return false;
+  SEEN.add(key);
+  setTimeout(() => SEEN.delete(key), 60_000);
   return true;
 }
 
-function eventBuffRemainingText() {
-  if (!isEventBuffActive()) return "kapalı";
-  const ms = eventBuff.until - Date.now();
-  const sec = Math.max(1, Math.round(ms / 1000));
-  const min = Math.floor(sec / 60);
-  const s = sec % 60;
-  return min > 0 ? `${min} dk ${s} sn` : `${s} sn`;
-}
-
-/* ===== İSTATİSTİK, ENVANTER, GÖREV, PET VE UNVAN SİSTEMİ ===== */
-
-/* --- Oyuncu istatistikleri --- */
+/* ==================== Oyuncu Yapısı ==================== */
 function ensureStats(player) {
   if (!player.stats || typeof player.stats !== "object") {
     player.stats = {
@@ -171,28 +117,20 @@ function ensureStats(player) {
       huntProfit: 0,
       boxesOpened: 0
     };
-  } else {
-    const s = player.stats;
-    if (typeof s.slotGames !== "number") s.slotGames = 0;
-    if (typeof s.slotNetWin !== "number") s.slotNetWin = 0;
-    if (typeof s.rouletteGames !== "number") s.rouletteGames = 0;
-    if (typeof s.rouletteWins !== "number") s.rouletteWins = 0;
-    if (typeof s.rouletteLosses !== "number") s.rouletteLosses = 0;
-    if (typeof s.bjGames !== "number") s.bjGames = 0;
-    if (typeof s.bjWins !== "number") s.bjWins = 0;
-    if (typeof s.bjLosses !== "number") s.bjLosses = 0;
-    if (typeof s.dailyDays !== "number") s.dailyDays = 0;
-    if (typeof s.huntCount !== "number") s.huntCount = 0;
-    if (typeof s.huntProfit !== "number") s.huntProfit = 0;
-    if (typeof s.boxesOpened !== "number") s.boxesOpened = 0;
   }
 }
+function ensureInventory(player) {
+  if (!player.inv || typeof player.inv !== "object") {
+    player.inv = { boxes: 0 };
+  }
+}
+function ensureCrystals(player) {
+  if (typeof player.crystals !== "number") player.crystals = 0;
+}
 
-/* --- Seviye sistemi: istatistiklerden hesaplanır --- */
 function calculatePlayerLevel(player) {
   ensureStats(player);
-  const s = player.stats || {};
-
+  const s = player.stats;
   const totalXp =
     (s.slotGames || 0)     * 2 +
     (s.rouletteGames || 0) * 3 +
@@ -200,605 +138,21 @@ function calculatePlayerLevel(player) {
     (s.huntCount || 0)     * 5 +
     (s.boxesOpened || 0)   * 4 +
     (s.dailyDays || 0)     * 10;
-
   const level = Math.max(1, Math.floor(totalXp / 100) + 1);
-
   return { level, totalXp };
 }
 
-/* --- Envanter (kutu) --- */
-function ensureInventory(player) {
-  if (!player.inv || typeof player.inv !== "object") {
-    player.inv = { boxes: 0 };
-  } else {
-    if (typeof player.inv.boxes !== "number") player.inv.boxes = 0;
-  }
-}
-
-/* --- Pet sistemi: çoklu pet + aktif pet + pasif katkı --- */
-const PET_SHOP = {
-  cekirge: {
-    key: "cekirge",
-    emoji: "🦗",
-    label: "Çekirge",
-    price: 6000,
-    crystalPrice: 15,
-    atk: 5,
-    luck: 15,
-    buyable: true,
-    desc: "Hızlı ve şanslı, ucuz giriş seviyesi pet."
-  },
-  karinca: {
-    key: "karinca",
-    emoji: "🐜",
-    label: "Karınca",
-    price: 8000,
-    crystalPrice: 18,
-    atk: 8,
-    luck: 8,
-    buyable: true,
-    desc: "Küçük ama çalışkan; uzun vadede sağlam katkı."
-  },
-  panda: {
-    key: "panda",
-    emoji: "🐼",
-    label: "Panda",
-    price: 16000,
-    crystalPrice: 35,
-    atk: 30,
-    luck: 30,
-    buyable: true,
-    desc: "Dengeli ve güçlü bir pet."
-  },
-  keci: {
-    key: "keci",
-    emoji: "🐐",
-    label: "Keçi",
-    price: 24000,
-    crystalPrice: 45,
-    atk: 40,
-    luck: 20,
-    buyable: true,
-    desc: "İnatçı; özellikle hunt kazancını bufflar."
-  },
-  at: {
-    key: "at",
-    emoji: "🐴",
-    label: "At",
-    price: 30000,
-    crystalPrice: 55,
-    atk: 35,
-    luck: 15,
-    buyable: true,
-    desc: "Dengeli, hız odaklı pet."
-  },
-  zebra: {
-    key: "zebra",
-    emoji: "🦓",
-    label: "Zebra",
-    price: 36000,
-    crystalPrice: 60,
-    atk: 30,
-    luck: 25,
-    buyable: true,
-    desc: "Hem şans hem saldırı açısından ortalama üstü."
-  },
-  kedi: {
-    key: "kedi",
-    emoji: "🐱",
-    label: "Kedi",
-    price: 40000,
-    crystalPrice: 70,
-    atk: 10,
-    luck: 20,
-    buyable: true,
-    desc: "Dengeli, şanslı küçük bir avcı."
-  },
-  tavsan: {
-    key: "tavsan",
-    emoji: "🐰",
-    label: "Tavşan",
-    price: 44000,
-    crystalPrice: 80,
-    atk: 10,
-    luck: 30,
-    buyable: true,
-    desc: "Çok şanslı, özellikle kutu ve drop işinde iyi."
-  },
-  kopek: {
-    key: "kopek",
-    emoji: "🐶",
-    label: "Köpek",
-    price: 50000,
-    crystalPrice: 90,
-    atk: 20,
-    luck: 10,
-    buyable: true,
-    desc: "Daha agresif; hunt kazancı biraz daha yüksek."
-  },
-  kartal: {
-    key: "kartal",
-    emoji: "🦅",
-    label: "Kartal",
-    price: 60000,
-    crystalPrice: 110,
-    atk: 45,
-    luck: 35,
-    buyable: true,
-    desc: "Yüksek görüş, yüksek şans."
-  },
-  suaygiri: {
-    key: "suaygiri",
-    emoji: "🦛",
-    label: "Su Aygırı",
-    price: 64000,
-    crystalPrice: 115,
-    atk: 60,
-    luck: 25,
-    buyable: true,
-    desc: "Ağır ve tank; hunt kazancını iyi bufflar."
-  },
-  fil: {
-    key: "fil",
-    emoji: "🐘",
-    label: "Fil",
-    price: 80000,
-    crystalPrice: 130,
-    atk: 70,
-    luck: 30,
-    buyable: true,
-    desc: "Güçlü, sabit ve güvenilir pet."
-  },
-  tilki: {
-    key: "tilki",
-    emoji: "🦊",
-    label: "Tilki",
-    price: 90000,
-    crystalPrice: 140,
-    atk: 30,
-    luck: 20,
-    buyable: true,
-    desc: "Kurnaz avcı; hem hunt hem kutuda güçlü."
-  },
-  gergedan: {
-    key: "gergedan",
-    emoji: "🦏",
-    label: "Gergedan",
-    price: 120000,
-    crystalPrice: 160,
-    atk: 90,
-    luck: 20,
-    buyable: true,
-    desc: "Ağır darbe vuran, saldırı odaklı pet."
-  },
-  cita: {
-    key: "cita",
-    emoji: "🐆",
-    label: "Çita",
-    price: 150000,
-    crystalPrice: 190,
-    atk: 100,
-    luck: 35,
-    buyable: true,
-    desc: "Çok hızlı ve tehlikeli avcı."
-  },
-  aslan: {
-    key: "aslan",
-    emoji: "🦁",
-    label: "Aslan",
-    price: 200000,
-    crystalPrice: 240,
-    atk: 150,
-    luck: 40,
-    buyable: true,
-    desc: "Ormanın kralı; efsane güçte pet."
-  },
-  ejderha: {
-    key: "ejderha",
-    emoji: "🐉",
-    label: "Ejderha",
-    price: 400000,
-    crystalPrice: 400,
-    atk: 100,
-    luck: 100,
-    buyable: true,
-    desc: "Efsane pet. Hem yüksek kazanç hem ekstra şans."
-  },
-
-  /* — Kutudan çıkan özel petler (artık kristalle de alınabilir) — */
-  kaplumbaga: {
-    key: "kaplumbaga",
-    emoji: "🐢",
-    label: "Kaplumbağa (Koleksiyon)",
-    price: 0,
-    crystalPrice: 130,
-    buyable: false,
-    atk: 50,
-    luck: 50,
-    desc: "Sadece kutudan çıkan ama kristalle de alınabilen koleksiyon peti."
-  },
-  salyangoz: {
-    key: "salyangoz",
-    emoji: "🐌",
-    label: "Salyangoz (Özel)",
-    price: 0,
-    crystalPrice: 140,
-    buyable: false,
-    atk: 20,
-    luck: 10,
-    desc: "Özel pet. Hunt drop şansını arttırır. Kutudan çıkabilir, kristalle de alınabilir."
-  },
-  koala: {
-    key: "koala",
-    emoji: "🐨",
-    label: "Koala (Efsane)",
-    price: 0,
-    crystalPrice: 180,
-    buyable: false,
-    atk: 30,
-    luck: 30,
-    desc: "Efsane pet. Kutudan çıkabilir, kristalle de alınabilir. Bot açıkken her 30 dakikada bir +3000 çip pasif gelir kazandırır."
-  }
-};
-
-/* --- Admin’e özel pet --- */
-const ADMIN_PET = {
-  key: "adminkurt",
-  emoji: "🐺",
-  label: "Alfa Kurt",
-  atk: 999,
-  luck: 999
-};
-
-function petTypeFromInput(raw) {
-  const t = normalizeTR(raw || "");
-  if (["cekirge","cekirga","cikrik"].includes(t)) return "cekirge";
-  if (["karinca","karınca","ant"].includes(t)) return "karinca";
-  if (["panda"].includes(t)) return "panda";
-  if (["keci","keçi","goat"].includes(t)) return "keci";
-  if (["at","horse"].includes(t)) return "at";
-  if (["zebra"].includes(t)) return "zebra";
-  if (["kedi","cat","pisi"].includes(t)) return "kedi";
-  if (["tavsan","tavşan","rabbit","bunny"].includes(t)) return "tavsan";
-  if (["kopek","köpek","kope","dog"].includes(t)) return "kopek";
-  if (["kartal","eagle"].includes(t)) return "kartal";
-  if (["suaygiri","su","aygiri","hippo"].includes(t)) return "suaygiri";
-  if (["fil","elephant"].includes(t)) return "fil";
-  if (["tilki","fox"].includes(t)) return "tilki";
-  if (["gergedan","rhino"].includes(t)) return "gergedan";
-  if (["cita","çita","cheetah"].includes(t)) return "cita";
-  if (["aslan","lion"].includes(t)) return "aslan";
-  if (["ejder","ejderha","dragon"].includes(t)) return "ejderha";
-  if (["kaplumbaga","kaplumbağa","turtle"].includes(t)) return "kaplumbaga";
-  if (["salyangoz","snail"].includes(t)) return "salyangoz";
-  if (["koala"].includes(t)) return "koala";
-  return null;
-}
-
-function ensurePet(player) {
-  if (!player.pets) {
-    if (player.pet) {
-      player.pets = [player.pet];
-    } else {
-      player.pets = [];
-    }
-  }
-  if (!Array.isArray(player.pets)) player.pets = [];
-  if (typeof player.activePetIndex !== "number") {
-    player.activePetIndex = player.pets.length ? 0 : -1;
-  }
-  if (player.activePetIndex >= player.pets.length) {
-    player.activePetIndex = player.pets.length ? 0 : -1;
-  }
-  player.pet = player.pets[player.activePetIndex] || null;
-}
-
-function getPetDisplayName(p) {
-  if (!p) return "-";
-  const def = p.type && PET_SHOP[p.type];
-  const base = def?.label || p.type || "Pet";
-  if (p.name && p.name !== base) return `${p.name} (${base})`;
-  return base;
-}
-
-function getPetPower(player) {
-  ensurePet(player);
-  const pets = player.pets || [];
-  if (!pets.length) {
-    return { atk: 0, luck: 0, active: null, others: [] };
-  }
-  let idx = player.activePetIndex;
-  if (!Number.isFinite(idx) || idx < 0 || idx >= pets.length) {
-    idx = 0;
-    player.activePetIndex = 0;
-  }
-  const active = pets[idx];
-  const others = pets.filter((_, i) => i !== idx);
-  let atk = active.atk || 0;
-  let luck = active.luck || 0;
-  for (const p of others) {
-    atk += (p.atk || 0) * 0.15;
-    luck += (p.luck || 0) * 0.15;
-  }
-  player.pet = active;
-  return { atk, luck, active, others };
-}
-
-function hasPetType(player, type) {
-  ensurePet(player);
-  return (player.pets || []).some(p => p.type === type);
-}
-
-function grantPet(player, type) {
-  ensurePet(player);
-  const def = PET_SHOP[type];
-  if (!def && type !== ADMIN_PET.key) return null;
-
-  if (type !== ADMIN_PET.key) {
-    if (hasPetType(player, type)) return null;
-    const pet = {
-      type: def.key,
-      name: def.label,
-      level: 1,
-      xp: 0,
-      atk: def.atk,
-      luck: def.luck
-    };
-    player.pets.push(pet);
-    if (player.activePetIndex === -1) player.activePetIndex = player.pets.length - 1;
-    player.pet = player.pets[player.activePetIndex];
-    return pet;
-  } else {
-    const pet = {
-      type: ADMIN_PET.key,
-      name: ADMIN_PET.label,
-      level: 1,
-      xp: 0,
-      atk: ADMIN_PET.atk,
-      luck: ADMIN_PET.luck
-    };
-    if (!hasPetType(player, ADMIN_PET.key)) {
-      player.pets.push(pet);
-    }
-    if (player.activePetIndex === -1) {
-      player.activePetIndex = player.pets.length - 1;
-    } else {
-      const idx = player.pets.findIndex(p => p.type === ADMIN_PET.key);
-      if (idx !== -1) player.activePetIndex = idx;
-    }
-    player.pet = player.pets[player.activePetIndex];
-    return pet;
-  }
-}
-
-function gainPetXP(player, amount) {
-  ensurePet(player);
-  if (!player.pets.length) return;
-  const idx = player.activePetIndex;
-  if (idx < 0 || idx >= player.pets.length) return;
-  const pet = player.pets[idx];
-  if (typeof pet.xp !== "number") pet.xp = 0;
-  pet.xp += amount;
-}
-/* --- Görev havuzu --- */
-const QUEST_POOL = [
-  {
-    key: "slotPlay",
-    desc: "Bugün en az 3 kez slot oyna",
-    target: 3,
-    reward: { chips: 3000 }
-  },
-  {
-    key: "rouletteWin",
-    desc: "Bugün rulette 1 kez kazan",
-    target: 1,
-    reward: { chips: 4500 }
-  },
-  {
-    key: "bjPlay",
-    desc: "Bugün 2 el blackjack oyna",
-    target: 2,
-    reward: { chips: 3750 }
-  },
-  {
-    key: "dailyClaim",
-    desc: "Bugünkü günlük ödülünü al",
-    target: 1,
-    reward: { chips: 1750 }
-  },
-  {
-    key: "huntTimes",
-    desc: "Bugün 5 kez .hunt yap",
-    target: 5,
-    reward: { chips: 3750 }
-  },
-  {
-    key: "boxOpen",
-    desc: "Bugün 2 kutu aç",
-    target: 2,
-    reward: { chips: 4500 }
-  }
-];
-
-function shuffleArray(arr) {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-function ensureQuests(player) {
-  const today = localDateKey();
-  if (
-    !player.quests ||
-    player.quests.date !== today ||
-    !Array.isArray(player.quests.activeKeys) ||
-    player.quests.activeKeys.length === 0
-  ) {
-    const allKeys = QUEST_POOL.map(q => q.key);
-    const shuffled = shuffleArray(allKeys);
-    const active = shuffled.slice(0, 3);
-    player.quests = {
-      date: today,
-      activeKeys: active,
-      progress: {},
-      completed: {}
-    };
-  }
-}
-
-function applyQuestProgress(player, key, amount) {
-  if (!amount || amount <= 0) return;
-  ensureQuests(player);
-  const qState = player.quests;
-  if (!qState.activeKeys.includes(key)) return;
-
-  const def = QUEST_POOL.find(q => q.key === key);
-  if (!def) return;
-
-  const prev = qState.progress[key] || 0;
-  const now = prev + amount;
-  qState.progress[key] = now;
-
-  if (!qState.completed[key] && now >= def.target) {
-    qState.completed[key] = true;
-    const rewardChips = def.reward?.chips || 0;
-    if (rewardChips > 0) {
-      player.stack += rewardChips;
-    }
-  }
-}
-
-/* --- Unvanlar --- */
-const TITLE_DEFS = [
-  {
-    key: "yeni_maceraci",
-    name: "🆕 Yeni Maceracı",
-    desc: "Oyuna katıldın.",
-    check: (p) => !!p.joined
-  },
-  {
-    key: "zengin_oyuncu",
-    name: "💰 Zengin Oyuncu",
-    desc: "Bakiyen 50.000 çipi geçti.",
-    check: (p) => p.stack >= 50000
-  },
-  {
-    key: "slot_ustasi",
-    name: "🎰 Slot Ustası",
-    desc: "Slotta toplam +10.000 çip net kazandın.",
-    check: (p) => (p.stats?.slotNetWin || 0) >= 10000
-  },
-  {
-    key: "rulet_ustasi",
-    name: "🎡 Rulet Ustası",
-    desc: "Rulette 10 kez kazandın.",
-    check: (p) => (p.stats?.rouletteWins || 0) >= 10
-  },
-  {
-    key: "bj_efsanesi",
-    name: "🃏 Blackjack Efsanesi",
-    desc: "Blackjack'te 20 kez kazandın.",
-    check: (p) => (p.stats?.bjWins || 0) >= 20
-  },
-  {
-    key: "sadik_oyuncu",
-    name: "📅 Sadık Oyuncu",
-    desc: "7 farklı günde günlük ödül aldın.",
-    check: (p) => (p.stats?.dailyDays || 0) >= 7
-  },
-  {
-    key: "yeni_avci",
-    name: "🪶 Yeni Avcı",
-    desc: "En az 1 kez .hunt yaptın.",
-    check: (p) => (p.stats?.huntCount || 0) >= 1
-  },
-  {
-    key: "usta_avci",
-    name: "🦴 Usta Avcı",
-    desc: "100 kez .hunt yaptın.",
-    check: (p) => (p.stats?.huntCount || 0) >= 100
-  },
-  {
-    key: "kutu_delisi",
-    name: "🎁 Kutu Delisi",
-    desc: "50 kutu açtın.",
-    check: (p) => (p.stats?.boxesOpened || 0) >= 50
-  },
-  {
-    key: "pet_sahibi",
-    name: "🐾 Pet Sahibi",
-    desc: "İlk petini aldın.",
-    check: (p) => !!(p.pet || (p.pets && p.pets.length > 0))
-  },
-  {
-    key: "owo_efsanesi",
-    name: "🌀 OwO Efsanesi",
-    desc: "Birçok unvan açtın.",
-    check: (p) => (p.titles?.owned?.length || 0) >= 5
-  },
-  {
-    key: "admin_lord",
-    name: "👑 Sunucu Lordu",
-    desc: "Yöneticiye özel prestij unvanı.",
-    check: (_p) => false
-  }
-];
-
-function ensureTitles(player) {
-  if (!player.titles || typeof player.titles !== "object") {
-    player.titles = { owned: [], activeKey: null };
-  } else {
-    if (!Array.isArray(player.titles.owned)) player.titles.owned = [];
-    if (typeof player.titles.activeKey !== "string" && player.titles.activeKey !== null) {
-      player.titles.activeKey = null;
-    }
-  }
-}
-
-function getOwnedTitleObjects(player) {
-  ensureTitles(player);
-  return TITLE_DEFS.filter(def => player.titles.owned.includes(def.key));
-}
-
-function getActiveTitleName(player) {
-  if (!player.titles || !player.titles.activeKey) return null;
-  const def = TITLE_DEFS.find(d => d.key === player.titles.activeKey);
-  return def ? def.name : null;
-}
-
-/* --- Kristal & profil teması için helper --- */
-function ensureCrystalsAndSkins(player) {
-  if (typeof player.crystals !== "number") player.crystals = 0;
-  if (!Array.isArray(player.profileSkins)) player.profileSkins = ["default"];
-  if (!player.profileSkins.includes("default")) player.profileSkins.unshift("default");
-  if (typeof player.activeProfileSkin !== "string" || !PROFILE_SKINS[player.activeProfileSkin]) {
-    player.activeProfileSkin = "default";
-  }
-}
-
-/* ===== Oyuncu yapısı ===== */
 function getPlayer(id, name) {
   if (!db.data.players[id]) {
     db.data.players[id] = {
       name,
       stack: STARTING_STACK,
       lastDaily: "",
-      locked: false,
       joined: false,
+      locked: false,
       stats: undefined,
-      quests: undefined,
-      titles: undefined,
       inv: undefined,
-      pets: undefined,
-      activePetIndex: undefined,
-      pet: undefined,
-      specialPityUsed: false,
-      crystals: 0,
-      profileSkins: ["default"],
-      activeProfileSkin: "default"
+      crystals: 0
     };
   } else {
     const p = db.data.players[id];
@@ -807,185 +161,33 @@ function getPlayer(id, name) {
     if (typeof p.locked !== "boolean") p.locked = false;
     if (typeof p.stack !== "number") p.stack = STARTING_STACK;
     if (typeof p.lastDaily !== "string") p.lastDaily = "";
-    if (typeof p.specialPityUsed !== "boolean") p.specialPityUsed = false;
   }
   const p = db.data.players[id];
   ensureStats(p);
-  ensureQuests(p);
-  ensureTitles(p);
   ensureInventory(p);
-  ensurePet(p);
-  ensureCrystalsAndSkins(p);
+  ensureCrystals(p);
   return p;
 }
 
-async function checkAndUnlockTitles(msg, player) {
-  ensureStats(player);
-  ensureTitles(player);
-  ensurePet(player);
-  const newly = [];
-  for (const def of TITLE_DEFS) {
-    if (def.check(player) && !player.titles.owned.includes(def.key)) {
-      player.titles.owned.push(def.key);
-      newly.push(def);
-    }
+/* ==================== Admin kontrol ==================== */
+function isAdminCheck(sender) {
+  const fileAdmins = readAdmins();
+  const phonePool = [
+    ...ADMIN_PHONES,
+    ...(fileAdmins.phones || []).map(normPhone)
+  ];
+  if (sender.phoneId) {
+    const p = sender.phoneId;
+    const p10 = sender.phoneIdLast10;
+    if (phonePool.some(ap => ap === p || last10(ap) === p10)) return true;
   }
-  if (newly.length > 0) {
-    await saveDB();
-    const lines = newly.map(d => `• ${d.name} — ${d.desc}`);
-    if (msg) {
-      await msg.reply(
-`🎖 *Yeni Unvan(lar) Kazandın!*
-
-${lines.join("\n")}
-
-Aktif unvanını değiştirmek için:
-.unvan — Unvan listesi
-.unvan set <numara> — Unvan seç`
-      );
-    }
+  if (sender.lid) {
+    if ((fileAdmins.lids || []).includes(sender.lid)) return true;
   }
-}
-
-/* ===== OwO tarzı öğretici metni ===== */
-const OWO_HELP =
-`🐾 *OwO Tarzı Oyun Sistemi Nedir?*
-
-Bu bot, Discord'daki OwO botundan esinlenmiş bir *ekonomi ve mini oyun* sistemidir.
-Amaç: çip biriktirmek, oyunlar oynayıp kazanmak, günlük görevleri tamamlayıp *unvanlar*, *petler* ve şimdi de *kristaller* + *profil temaları* toplamaktır.
-
-🎮 *Temel Komutlar*
-• .join — Oyuna katıl, başlangıç çipini al
-• .bakiye — Bakiyeni ve aktif unvanını gör
-• .profil — Genel profilini, kristalini ve seçili temasını gör
-• .stats — Kişisel istatistiklerini gösterir
-• .stats all — Tüm oyuncuların genel (global) istatistiklerini gösterir
-• .seviye — Seviyeni ve XP ilerlemeni gör
-• .top seviye — En yüksek seviyedeki oyuncuları gör
-• .günlük — Günlük çip ödülünü al
-• .slot <miktar> — Slot makinesi oynarsın
-• .rulet <miktar> <seçim> — Rulet oynarsın (örn: .rulet 100 kırmızı)
-• .bj <miktar> — Blackjack oyunu başlatır
-• .hunt — Avlan, çip ve kutu bul (pet bonuslarıyla daha da güçlü)
-• .kutu — Elindeki kutuları aç (artık kristal de düşebilir)
-• .kutu all — Tüm kutuları tek seferde aç
-• .görev — Bugüne özel rastgele 3 görevi gösterir
-• .unvan — Unvanlarını listele / seç
-• .pet — Pet sistemini ve petini yönet
-• .pet shop — Pet fiyatlarını *çip + kristal* olarak gör
-• .kristal — Toplam kristalini gör, kristali çipe dönüştür
-• .profilskin — Profil temalarını listele / satın al / seç
-• .owo — Bu rehberi tekrar gösterir
-
-💎 *Kristal Sistemi*
-
-• Kutu açarken az ihtimalle *kristal* düşer (1–3 arası).
-• Etkinlik buff’ı (.eventbuff) açıkken kristal drop oranı artar.
-• Kristaller çok değerli bir para birimidir:
-  - Pet satın alırken çip yerine kristal kullanabilirsin.
-  - .kristal bozdur <miktar> ile kristali çipe çevirebilirsin.
-  - Profil temaları (Nadir / Efsanevi) kristalle satın alınır.
-
-📦 *Kutu & Özel Pet Drop Oranları*
-Kutu açarken:
-• Normal çip ödülleri + pet bonusları + buff bonusu
-• Düşük ihtimalle özel petler:
-  - 🐢 Kaplumbağa
-  - 🐌 Salyangoz
-  - 🐨 Koala
-• Aynı zamanda az ihtimalle 1–3 *kristal* düşebilir.
-
-🖼️ *Profil Temaları*
-• .profilskin list — Sahip olduğun ve satın alabileceğin temaları gösterir.
-• Temalar:
-  - Standart Profil (Sıradan, ücretsiz)
-  - Neon Oyuncu (Nadir, kristal ile)
-  - Efsane Gösteriş (Efsanevi, kristal ile)
-  - 👑 Yönetici Tahtı (Sadece adminlere özel)
-• .profilskin al <tema>
-• .profilskin set <tema>
-
-🐾 *Pet Sistemi (Çoklu Pet)*
-
-Artık birden fazla pet alabilirsin! Petlerin hem çip hem kristal fiyatı vardır.
-Çipin yetmiyorsa kristalle alabilir, ya da kristalini çipe çevirebilirsin.
-
-Satın alınabilen pet örnekleri (küçükten büyüğe):
-• 🦗 Çekirge — 6000 çip | ~15 kristal
-• 🐜 Karinca — 8000 çip | ~18 kristal
-• 🐼 Panda — 16000 çip | ~35 kristal
-• 🐐 Keçi — 24000 çip | ~45 kristal
-• 🐴 At — 30000 çip | ~55 kristal
-• ...
-
-Kutudan çıkan özel petler (artık kristalle de alınabilir):
-• 🐢 Kaplumbağa (Koleksiyon)
-• 🐌 Salyangoz (Özel) — Hunt drop şansını arttırır.
-• 🐨 Koala (Efsane) — Bot açıkken her 30 dakikada bir +3000 çip pasif gelir kazandırır.
-
-Komutlar:
-• .pet — Aktif petini ve özetini gösterir
-• .pet al <tür> — Pet satın al (çip veya kristal)
-• .pet liste — Tüm sahip olduğun petleri listele
-• .pet set <numara> — Listeden bir peti *aktif* yap
-• .pet isim <yeni_ad> — Aktif petine isim ver
-• .pet shop — Tüm petleri ve fiyatlarını gör
-
-📜 *Günlük Görevler*
-• .görev — Bugüne özel rastgele görevler:
-  - 3 kez slot oyna
-  - 2 el blackjack oyna
-  - 5 kez .hunt yap
-  - 2 kutu aç
-  Görevler tamamlanınca otomatik çip ödülü eklenir.
-
-🎖 *Unvan Sistemi*
-• Oynadıkça sistem seni takip eder ve otomatik unvan açarsın:
-  - 🆕 Yeni Maceracı
-  - 💰 Zengin Oyuncu
-  - 🎰 Slot Ustası
-  - 🎡 Rulet Ustası
-  - 🃏 Blackjack Efsanesi
-  - 🪶 Yeni Avcı / 🦴 Usta Avcı
-  - 🎁 Kutu Delisi
-  - 🐾 Pet Sahibi
-  - 📅 Sadık Oyuncu
-
-• .unvan — Unvanlarını listele
-• .unvan set <numara> — Aktif olarak göstermek istediğin unvanı seç
-
-👑 *Yönetici Özel*
-• .pet adminkurt → Admin’e özel Alfa Kurt peti (ATK/LUCK 999)
-• .unvan admin → Admin’e özel Sunucu Lordu unvanını açar
-• .eventbuff → 15 dk boyunca hunt & kutu kazancı + kristal drop oranını arttıran etkinlik başlatır
-• .profilskin admin → Admin’e özel profil temasını (👑 Yönetici Tahtı) açar
-
-💡 *Taktik*
-Her gün:
-1) .join (bir kereye mahsus)
-2) .günlük al
-3) .slot / .rulet / .bj / .hunt ile oyna
-4) .kutu veya .kutu all ile kutuları aç (kristal + özel pet şansı)
-5) .kristal ile ister pet al, ister çipe çevir
-6) .profilskin ile kendine bir tema seç
-7) .unvan ile havalı unvanını seç 😎`;
-/* --- Oyuna katılım şartı kontrolü --- */
-async function requireJoined(msg, player) {
-  if (player.joined) return true;
-  await msg.reply("🎟 Oyuna katılmak için `.join` yaz.");
   return false;
 }
 
-/* --- Mesaj sahibine göre stabil oyun anahtarı üretir --- */
-function makeGameKey(msg, s) {
-  const chat = (msg.from || "").split("@")[0];
-  const author = (msg.author || "").split("@")[0];
-  if (s.phoneId) return `p:${s.phoneId}`;
-  if (author)  return `g:${chat}:${author}`;
-  return `c:${chat}`;
-}
-
-/* ====== LID uyumlu gönderen çözümleyici ====== */
+/* ==================== Gönderici çözümleyici ==================== */
 async function resolveSender(msg) {
   const authorId = msg.author || "";
   const fromId   = msg.from   || "";
@@ -1004,137 +206,17 @@ async function resolveSender(msg) {
   };
 }
 
-/* ====== Tek hedef çözücü ====== */
-const samePerson = (a, b) => last10(a) === last10(b);
-
-async function resolveSingleTarget(msg) {
-  const foundMentions = [];
-  const foundReply = [];
-  const foundNumbers = [];
-  const foundInternal = [];
-
-  // @mention’lardan
-  try {
-    const mentions = (await msg.getMentions?.()) || [];
-    for (const c of mentions) {
-      let n = null;
-      try { n = await c.getNumber?.(); } catch {}
-      const u = c?.id?.user || null;
-      const cand = n || u;
-      if (cand) {
-        const pn = normPhone(cand);
-        if (!foundMentions.some(x => samePerson(x, pn))) foundMentions.push(pn);
-      }
-    }
-  } catch {}
-
-  // Yanıtlanan mesajdan
-  try {
-    const quoted = await msg.getQuotedMessage?.();
-    if (quoted) {
-      const qc = await quoted.getContact?.();
-      let qn = null;
-      try { qn = await qc.getNumber?.(); } catch {}
-      const qu = qc?.id?.user || null;
-      const cand = qn || qu;
-      if (cand) {
-        const pn = normPhone(cand);
-        if (!foundReply.some(x => samePerson(x, pn))) foundReply.push(pn);
-      }
-    }
-  } catch {}
-
-  // Mesaj içindeki numaralardan
-  const words = (msg.body || "").split(/\s+/);
-  for (const w of words) {
-    const d = (w || "").replace(/\D/g, "");
-    if (d.length >= 10 && d.length <= 15) {
-      const pn = normPhone(d);
-      if (!foundNumbers.some(x => samePerson(x, pn))) foundNumbers.push(pn);
-    }
-  }
-
-  // İç mentionedIds alanından
-  try {
-    const raw = msg?._data?.mentionedIds || msg?.mentionedIds || [];
-    for (const r of raw) {
-      const u = String(r).split("@")[0];
-      if (u) {
-        const pn = normPhone(u);
-        if (!foundInternal.some(x => samePerson(x, pn))) foundInternal.push(pn);
-      }
-    }
-  } catch {}
-
-  const pickUnique = (arr) => {
-    const out = [];
-    for (const p of arr) if (!out.some(x => samePerson(x, p))) out.push(p);
-    return out;
-  };
-
-  const m = pickUnique(foundMentions);
-  if (m.length === 1) return { ok: true, id: m[0] };
-  if (m.length > 1) return { ok: false, reason: "multi", message: `⚠️ Birden fazla kişi algılandı (${m.map(x => last10(x)).join(", ")}). Lütfen *tek* bir kişi belirt.` };
-
-  const r = pickUnique(foundReply);
-  if (r.length === 1) return { ok: true, id: r[0] };
-  if (r.length > 1) return { ok: false, reason: "multi", message: `⚠️ Birden fazla kişi algılandı (${r.map(x => last10(x)).join(", ")}). Lütfen *tek* bir kişi belirt.` };
-
-  const n = pickUnique(foundNumbers);
-  if (n.length === 1) return { ok: true, id: n[0] };
-  if (n.length > 1) return { ok: false, reason: "multi", message: `⚠️ Birden fazla kişi algılandı (${n.map(x => last10(x)).join(", ")}). Lütfen *tek* bir kişi belirt.` };
-
-  const i = pickUnique(foundInternal);
-  if (i.length === 1) return { ok: true, id: i[0] };
-  if (i.length > 1) return { ok: false, reason: "multi", message: `⚠️ Birden fazla kişi algılandı (${i.map(x => last10(x)).join(", ")}). Lütfen *tek* bir kişi belirt.` };
-
-  return {
-    ok: false,
-    reason: "none",
-    message: "⚠️ Hedef bulunamadı. *Tek* bir @kişi etiketle, numarasını yaz ya da kişinin mesajını *yanıtlayarak* gönder."
-  };
-}
-
-/* ====== Mention’lardan toplu çıkarıcı ====== */
-function onlyDigits(s){ return (s||"").replace(/\D/g,""); }
-
-async function extractMentionedIds(msg) {
-  try {
-    const contacts = (await msg.getMentions?.()) || [];
-    const fromMentions = await Promise.all(contacts.map(async (c) => {
-      let n = null;
-      try { n = await c.getNumber?.(); } catch {}
-      const u = c?.id?.user || null;
-      const cand = n || u;
-      return cand ? normPhone(cand) : null;
-    }));
-    const mentionIds = fromMentions.filter(Boolean);
-    const raw = (msg.body || "")
-      .split(/\s+/)
-      .filter(w => /^\d{10,15}$/.test(onlyDigits(w)))
-      .map(w => normPhone(w));
-    return Array.from(new Set([...mentionIds, ...raw]));
-  } catch {
-    return [];
-  }
-}
-
-/* ==================== Dedupe ==================== */
-const SEEN = new Set();
-function shouldProcess(msg) {
-  const key = msg?.id?._serialized || msg?.id?.id || `${msg.timestamp}:${msg.from}`;
-  if (SEEN.has(key)) return false;
-  SEEN.add(key);
-  setTimeout(() => SEEN.delete(key), 60_000);
-  return true;
-}
-
-/* ==== Transfer dedupe ==== */
-const DONE_TX = new Set();
-
-/* ==================== Oyun Durumu & Yardımcılar ==================== */
-const animations = ["🂠💫", "🃏✨", "💥🂡", "🎴🌀", "💫🂱", "🪄🂾", "💨🃏", "🂫🔥"];
+/* ==================== Oyun Durumu & Blackjack ==================== */
+const animations = ["🂠💫", "🃏✨", "💥🂡", "🎴🌀"];
 const games = {};
+
+function makeGameKey(msg, s) {
+  const chat = (msg.from || "").split("@")[0];
+  const author = (msg.author || "").split("@")[0];
+  if (s.phoneId) return `p:${s.phoneId}`;
+  if (author)  return `g:${chat}:${author}`;
+  return `c:${chat}`;
+}
 
 const suits = ["♠️", "♥️", "♦️", "♣️"];
 const values = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
@@ -1144,7 +226,6 @@ function drawCard() {
   const value = values[Math.floor(Math.random() * values.length)];
   return { suit, value };
 }
-
 function getHandValue(hand) {
   let value = 0, aces = 0;
   for (const card of hand) {
@@ -1155,72 +236,11 @@ function getHandValue(hand) {
   while (value > 21 && aces > 0) { value -= 10; aces--; }
   return value;
 }
-
 function suitDot(suit) { return (suit === "♥️" || suit === "♦️") ? "🔴" : "⚫"; }
 function handToDotString(hand) { return hand.map(c => `${c.value}${suitDot(c.suit)}`).join(" "); }
 function valueText(val) { return (val > 21) ? "BUST! 💥" : String(val); }
 
-/* ===== Grup yardımcıları ===== */
-async function isGroupAdminByMsg(msg) {
-  const chat = await msg.getChat();
-  if (!chat.isGroup) return { isGroup: false, isGroupAdmin: false, chat };
-  const senderId = msg.author || (await msg.getContact())?.id?._serialized;
-  const isGroupAdmin = (chat.participants || []).some(p =>
-    p.isAdmin && (p.id?._serialized === senderId)
-  );
-  return { isGroup: true, isGroupAdmin, chat };
-}
-
-/* ========== Yardım metni ========== */
-function buildHelpText(isAdmin) {
-  const userPart =
-`♣️ *Komutlar*
-• .join — Oyuna katıl
-• .bakiye — Bakiyeni gösterir
-• .profil — Profilini, kristalini ve istatistiklerini gösterir
-• .seviye — Seviye ve XP ilerlemeni gösterir
-• .top seviye — En yüksek seviyedeki oyuncuları gösterir
-• .günlük — Günlük ödül
-• .score — Skor tablosu
-• .slot <miktar> — Slot
-• .bj <miktar> | .bj bet <miktar> — Blackjack
-• .rulet <miktar> <seçim> — Rulet (örn: .rulet 100 kırmızı)
-• .hunt — Avlan, çip ve kutu kazan (3 sn bekleme)
-• .kutu — Elindeki kutuları aç (kristal + özel pet şansı)
-• .kutu all — Tüm kutuları tek seferde aç
-• .görev — Günlük rastgele görevlerini gösterir
-• .unvan — Unvanlarını listele / ayarla
-• .pet — Petini gör / al / seç
-• .pet liste — Tüm petlerini listele
-• .pets — Tüm sahip olduğun petleri listele
-• .pet shop — Petleri *çip + kristal* fiyatlarıyla gör
-• .kristal — Toplam kristalini gör ve kristali çipe dönüştür
-• .profilskin — Profil temalarını listele / satın al / seç
-• .owo — OwO tarzı sistemi anlatan rehber
-
-🎮 Oyun içi: .hit | .stand | .db | .sur
-
-ℹ️ İpucu: ".bj" tek başına yazınca kısayol menüsü gelir. ".rulet" tek başına yazınca rulet yardımını, ".kristal" yazınca kristal durumunu görürsün.`;
-
-  const adminPart =
-`\n\n👑 *Yönetici Komutları*
-• .allpman — Herkese +5000
-• .alpman — Kendine +15000
-• .max — Kendine 999999999999 çip ekler
-• .listedenat @kişi — Skordan çıkar
-• .bakiye reset @kişi — 0 yap
-• .send <miktar> @kişi — Çip gönder
-• !everyone [mesaj] — Gruptaki herkesi etiketle
-• !kilit — Sadece yöneticiler mesaj atabilsin
-• !kilitaç — Herkese tekrar yazma izni
-• .pet adminkurt — Admin’e özel Alfa Kurt peti (ATK/LUCK 999)
-• .unvan admin — Admin’e özel Sunucu Lordu unvanını açar
-• .eventbuff — Hunt & kutu için geçici etkinlik buff’ı + kristal drop artışı başlatır
-• .profilskin admin — Admin’e özel profil temasını (👑 Yönetici Tahtı) açar`;
-
-  return isAdmin ? (userPart + adminPart) : userPart;
-}
-/* ==================== SLOT & JACKPOT ==================== */
+/* ==================== SLOT ==================== */
 const symbols = ["🍒", "🍋", "🍉", "🍇", "🥝", "🍀", "⭐"];
 const paytable = { "🍒": 2, "🍋": 3, "🍉": 4, "🍇": 5, "🥝": 6, "🍀": 8, "⭐": 12 };
 let jackpot = 5000;
@@ -1231,7 +251,6 @@ function spinSlot() {
   );
   return grid;
 }
-
 function checkSlotWin(grid, bet) {
   let totalWin = 0;
   const lines = [];
@@ -1256,16 +275,9 @@ function checkSlotWin(grid, bet) {
 const ROULET_HELP =
 `🎡 *RULET ÖĞRETİCİSİ* 🎡
 
-Rulet oynamak için komut:
-.rulet <miktar> <seçim>
+Kullanım: .rulet <miktar> <seçim>
 
-🔢 1) Miktar Nedir?
-• Oyun için kaç çiple bahis yapacağını gösterir.
-
-🎯 2) Seçim Nedir?
-Renk / tek-çift / 1-18 / 19-36 / düzineler veya direkt sayı (0–36) seçebilirsin.
-
-📌 Örnekler:
+Örnekler:
 • .rulet 100 kırmızı
 • .rulet 200 tek
 • .rulet 150 1-12
@@ -1273,17 +285,14 @@ Renk / tek-çift / 1-18 / 19-36 / düzineler veya direkt sayı (0–36) seçebil
 • .rulet 100 0`;
 
 const REDS = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
-
 function rouletteColor(n) {
   if (n === 0) return { name: "yeşil", dot: "🟢" };
   if (REDS.has(n)) return { name: "kırmızı", dot: "🔴" };
   return { name: "siyah", dot: "⚫" };
 }
-
 function rouletteSpin() {
   return Math.floor(Math.random() * 37);
 }
-
 function parseRoulettePick(rawTokens){
   const raw = normalizeTR(rawTokens.join(" "));
   if (!raw) return { ok:false, message: "Kullanım: .rulet <miktar> <secim>. Örn: .rulet 100 kirmizi" };
@@ -1296,28 +305,24 @@ function parseRoulettePick(rawTokens){
       test: (n)=> n === num, payout: 35
     };
   }
-
   if (["k","kirmizi","red"].includes(t)) {
     return { ok:true, kind:"color:red", title:"Kırmızı", test:(n)=> n!==0 && REDS.has(n), payout:1 };
   }
   if (["s","siyah","black"].includes(t)) {
     return { ok:true, kind:"color:black", title:"Siyah", test:(n)=> n!==0 && !REDS.has(n), payout:1 };
   }
-
   if (["tek","odd"].includes(t)) {
     return { ok:true, kind:"odd", title:"Tek", test:(n)=> n!==0 && n%2===1, payout:1 };
   }
   if (["cift","cif","even"].includes(t)) {
     return { ok:true, kind:"even", title:"Çift", test:(n)=> n!==0 && n%2===0, payout:1 };
   }
-
   if (["1-18","alt","low"].includes(t)) {
     return { ok:true, kind:"low", title:"1-18", test:(n)=> n>=1 && n<=18, payout:1 };
   }
   if (["19-36","ust","high","yuksek"].includes(t)) {
     return { ok:true, kind:"high", title:"19-36", test:(n)=> n>=19 && n<=36, payout:1 };
   }
-
   if (["1-12","d1","duzin1","duzine1"].includes(t)) {
     return { ok:true, kind:"dozen1", title:"1-12", test:(n)=> n>=1 && n<=12, payout:2 };
   }
@@ -1327,7 +332,6 @@ function parseRoulettePick(rawTokens){
   if (["25-36","d3","duzin3","duzine3"].includes(t)) {
     return { ok:true, kind:"dozen3", title:"25-36", test:(n)=> n>=25 && n<=36, payout:2 };
   }
-
   return { ok:false, message:
 `⚠️ Geçersiz seçim.
 Örnekler:
@@ -1336,6 +340,54 @@ function parseRoulettePick(rawTokens){
 • .rulet 150 1-12
 • .rulet 50 17
 • .rulet 100 0` };
+}
+
+/* ==================== Hunt & Kutu ==================== */
+const HUNT_COOLDOWN_MS = 3000;
+const lastHuntTimes = {}; // keyId -> ms
+
+const SLOT_COOLDOWN_MS = 3000;
+const lastSlotTimes = {}; // keyId -> ms
+
+const SPECIAL_DROP_RATES = {
+  koala: 0.001,       // %0.1
+  salyangoz: 0.002,   // %0.2
+  kaplumbaga: 0.003   // %0.3
+};
+
+/* ==================== Yardım Metni ==================== */
+function buildHelpText(isAdmin) {
+  const userPart =
+`♣️ *Komutlar*
+• .join — Oyuna katıl
+• .bakiye — Bakiyeni gösterir
+• .profil — Profilini gösterir
+• .stats — Detaylı istatistik
+• .günlük — Günlük ödül
+• .slot <miktar> — Slot
+• .rulet <miktar> <seçim> — Rulet (örn: .rulet 100 kırmızı)
+• .bj <miktar> — Blackjack başlat
+• .hit | .stand | .db — Blackjack devam komutları
+• .hunt — Avlan, çip ve kutu kazan (3 sn bekleme)
+• .kutu — 1 kutu aç
+• .kutu all — Tüm kutuları aç
+• .kristal — Kristal durumunu ve bozdurmayı gösterir
+
+ℹ️ Örnek:
+.slot 500
+.rulet 200 tek
+.bj 1000`;
+
+  const adminPart =
+`\n\n👑 *Yönetici Komutları*
+• .allpman — Herkese +5000
+• .alpman — Kendine +15000
+• .max — Kendine 999999999 çip
+• .send <miktar> @kişi — Çip gönder
+• .bakiye reset @kişi — Bakiyesini sıfırla
+• .listedenat @kişi — Skordan çıkar`;
+
+  return isAdmin ? (userPart + adminPart) : userPart;
 }
 
 /* ==================== WhatsApp Client ==================== */
@@ -1349,298 +401,7 @@ client.on("ready", () => console.log("✅ Bot aktif!"));
 client.on("auth_failure", m => console.error("❌ Kimlik doğrulama hatası:", m));
 client.on("disconnected", r => console.warn("⚠️ Bağlantı koptu:", r));
 
-/* ==================== Ortak: Admin kontrol ==================== */
-function isAdminCheck(sender) {
-  const fileAdmins = readAdmins();
-  const phonePool = [
-    ...ADMIN_PHONES,
-    ...(fileAdmins.phones || []).map(normPhone)
-  ];
-  if (sender.phoneId) {
-    const p = sender.phoneId;
-    const p10 = sender.phoneIdLast10;
-    if (phonePool.some(ap => ap === p || last10(ap) === p10)) return true;
-  }
-  if (sender.lid) {
-    if ((fileAdmins.lids || []).includes(sender.lid)) return true;
-  }
-  return false;
-}
-
-/* ===== Hunt cooldown (3 saniye) ===== */
-const HUNT_COOLDOWN_MS = 3000;
-const lastHuntTimes = {}; // keyId -> ms
- 
-/* ===== Slot cooldown (3 saniye) ===== */
-const SLOT_COOLDOWN_MS = 3000;
-const lastSlotTimes = {}; // keyId -> ms
-
-/* ===== Kutu özel pet drop oranları ===== */
-const SPECIAL_DROP_RATES = {
-  koala: 0.001,       // %0.1
-  salyangoz: 0.002,   // %0.2
-  kaplumbaga: 0.003   // %0.3
-};
-
-/* ===== Koala pasif gelir sistemi ===== */
-const KOALA_PASSIVE_INTERVAL_MS = 30 * 60 * 1000; // 30 dakika
-const KOALA_PASSIVE_AMOUNT = 3000;
-
-setInterval(async () => {
-  try {
-    if (!db.data || !db.data.players) return;
-    let affected = 0;
-    for (const player of Object.values(db.data.players)) {
-      ensurePet(player);
-      if (hasPetType(player, "koala")) {
-        player.stack += KOALA_PASSIVE_AMOUNT;
-        affected++;
-      }
-    }
-    if (affected > 0) {
-      await saveDB();
-      console.log(`🐨 Koala pasif geliri: ${affected} oyuncuya +${KOALA_PASSIVE_AMOUNT} çip verildi.`);
-    }
-  } catch (err) {
-    console.error("Koala pasif gelir hatası:", err);
-  }
-}, KOALA_PASSIVE_INTERVAL_MS);
-/* ==================== KRİSTAL & PROFİL TEMA SİSTEMİ ==================== */
-
-/* 1 kristalin çip değeri (dönüştürme için) */
-const CRYSTAL_TO_CHIP_RATE = 2500; // 1 💎 = 2500 çip
-
-/* Kutu açarken kristal çıkma ihtimali */
-const BASE_CRYSTAL_DROP_CHANCE = 0.08; // %8 temel
-const EVENTBUFF_CRYSTAL_BONUS   = 0.07; // etkinlikte +%7
-
-/* Petlerin kristal fiyatları (özel petler dahil) */
-const PET_CRYSTAL_PRICES = {
-  cekirge: 5,
-  karinca: 8,
-  panda: 15,
-  keci: 20,
-  at: 25,
-  zebra: 30,
-  kedi: 35,
-  tavsan: 40,
-  kopek: 45,
-  kartal: 60,
-  suaygiri: 65,
-  fil: 80,
-  tilki: 90,
-  gergedan: 120,
-  cita: 150,
-  aslan: 200,
-  ejderha: 400,
-
-  // Özel petler – sadece kristal ile alınabilir
-  kaplumbaga: 80,
-  salyangoz: 120,
-  koala: 220
-};
-
-/* Profil temaları */
-const PROFILE_SKINS = {
-  default: {
-    key: "default",
-    name: "Klasik Profil",
-    rarity: "Standart",
-    crystalCost: 0,
-    adminOnly: false,
-    description: "Varsayılan sade görünüm."
-  },
-  rare_blue: {
-    key: "rare_blue",
-    name: "Mavi Çerçeve",
-    rarity: "Nadir",
-    crystalCost: 25,
-    adminOnly: false,
-    description: "Mavi şeritler ve temiz görünüm."
-  },
-  epic_purple: {
-    key: "epic_purple",
-    name: "Mor Enerji",
-    rarity: "Efsanevi",
-    crystalCost: 60,
-    adminOnly: false,
-    description: "Mor vurgular ve güçlü çerçeve."
-  },
-  legendary_gold: {
-    key: "legendary_gold",
-    name: "Altın Alev",
-    rarity: "Mitik",
-    crystalCost: 120,
-    adminOnly: false,
-    description: "Altın çerçeve ve parıltılı başlık."
-  },
-  admin_throne: {
-    key: "admin_throne",
-    name: "👑 Yönetici Tahtı",
-    rarity: "Özel (Admin)",
-    crystalCost: 0,
-    adminOnly: true,
-    description: "Sadece adminlere özel prestij profili."
-  }
-};
-
-/* Oyuncunun kozmetik alanını garantiye al */
-function ensureCosmetics(player) {
-  if (!player.cosmetics || typeof player.cosmetics !== "object") {
-    player.cosmetics = {
-      skinsOwned: ["default"],
-      activeSkin: "default"
-    };
-  } else {
-    if (!Array.isArray(player.cosmetics.skinsOwned)) {
-      player.cosmetics.skinsOwned = ["default"];
-    }
-    if (!player.cosmetics.skinsOwned.includes("default")) {
-      player.cosmetics.skinsOwned.unshift("default");
-    }
-    if (typeof player.cosmetics.activeSkin !== "string") {
-      player.cosmetics.activeSkin = "default";
-    }
-  }
-}
-
-/* Aktif skin objesini döndür */
-function getActiveSkin(player) {
-  ensureCosmetics(player);
-  const key = player.cosmetics.activeSkin || "default";
-  return PROFILE_SKINS[key] || PROFILE_SKINS.default;
-}
-
-/* Profil metnini temaya göre oluşturan fonksiyon */
-function renderProfile(player, isAdmin) {
-  ensureStats(player);
-  ensureInventory(player);
-  ensurePet(player);
-  ensureQuests(player);
-  ensureCosmetics(player);
-
-  if (typeof player.crystals !== "number") player.crystals = 0;
-
-  const activeTitleName = getActiveTitleName(player) || "Yok";
-
-  let activePetText = "Yok";
-  if (player.pet) {
-    const petType = player.pet.type || "-";
-    const petName = player.pet.name || petType;
-    activePetText = `${petName} (${petType})`;
-  }
-
-  const qState = player.quests;
-  let questLines = [];
-  if (qState && Array.isArray(qState.activeKeys) && qState.activeKeys.length) {
-    questLines = qState.activeKeys
-      .map((key) => {
-        const def = QUEST_POOL.find((q) => q.key === key);
-        if (!def) return null;
-        const prog = (qState.progress && qState.progress[key]) || 0;
-        const done = !!(qState.completed && qState.completed[key]);
-        const status = done ? "✅" : `⏳ ${prog}/${def.target}`;
-        return `• ${def.desc} — ${status}`;
-      })
-      .filter(Boolean);
-  }
-
-  const questsText = questLines.length
-    ? questLines.join("\n")
-    : "• Bugün için görev bulunamadı. Detay için .görev yaz.";
-
-  const s = player.stats || {};
-  const { level, totalXp } = calculatePlayerLevel(player);
-  const skin = getActiveSkin(player);
-
-  const baseBody =
-`Ad: ${player.name || "-"}
-🏦 Bakiye: ${player.stack}
-💎 Kristal: ${player.crystals}
-🎖 Aktif Unvan: ${activeTitleName}
-🐾 Aktif Pet: ${activePetText}
-⭐ Seviye: ${level} (XP: ${totalXp})
-
-📊 *Genel İstatistikler*
-• Slot oyunları: ${s.slotGames}
-• Slot net kazanç: ${s.slotNetWin}
-• Rulet galibiyetleri: ${s.rouletteWins}/${s.rouletteGames}
-• BJ galibiyetleri: ${s.bjWins}/${s.bjGames}
-• Hunt sayısı: ${s.huntCount}
-• Açılan kutu: ${s.boxesOpened}
-• Günlük alınan gün sayısı: ${s.dailyDays}
-
-📜 *Bugünkü Görevler*
-${questsText}
-
-🎨 Aktif Tema: ${skin.name} (${skin.rarity})
-🔹 Tema değiştirmek için: .profilskin
-🔹 Pet ve kristal detayları için: .pet | .kristal`;
-
-  // Admin özel profil (Kullanıcı seçtiyse ve gerçekten admin ise)
-  if (skin.key === "admin_throne" && isAdmin) {
-    return (
-`👑 *${player.name || "-"} — Yönetici Tahtı* 👑
-━━━━━━━━━━━━━━━━━━━━
-
-🏰 Unvan: ${activeTitleName}
-💎 Kristal: ${player.crystals}
-🏦 Bakiye: ${player.stack}
-🐾 Aktif Pet: ${activePetText}
-⭐ Seviye: ${level} (XP: ${totalXp})
-
-━━━━━━━━━━━━━━━━━━━━
-📊 *Genel İstatistikler*
-• Slot: ${s.slotGames} el (Net: ${s.slotNetWin})
-• Rulet: ${s.rouletteWins}/${s.rouletteGames}
-• BJ: ${s.bjWins}/${s.bjGames}
-• Hunt: ${s.huntCount} (Toplam kazanç: ${s.huntProfit})
-• Açılan kutu: ${s.boxesOpened}
-• Günlük gün: ${s.dailyDays}
-
-━━━━━━━━━━━━━━━━━━━━
-📜 *Bugünkü Görevler*
-${questsText}
-
-🎨 Tema: ${skin.name} (${skin.rarity})
-📌 Diğer temalar için: .profilskin
-💎 Kristal dönüştür: .kristal çevir <adet>`
-    );
-  }
-
-  // Diğer temalar için ufak kozmetik farklar
-  if (skin.key === "legendary_gold") {
-    return (
-`✨🟡 *PROFİL — ALTIN ALEV* 🟡✨
-
-${baseBody}`
-    );
-  }
-
-  if (skin.key === "epic_purple") {
-    return (
-`💜⚡ *PROFİL — MOR ENERJİ* ⚡💜
-
-${baseBody}`
-    );
-  }
-
-  if (skin.key === "rare_blue") {
-    return (
-`💠 *PROFİL — MAVİ ÇERÇEVE* 💠
-
-${baseBody}`
-    );
-  }
-
-  // Varsayılan görünüm
-  return (
-`👤 *Profil Bilgileri*
-
-${baseBody}`
-  );
-}
-/* ==================== Mesaj İşleyici ==================== */
+/* ==================== Komutlar ==================== */
 async function handleMessageSafe(msg) {
   if (!shouldProcess(msg)) return;
 
@@ -1649,13 +410,8 @@ async function handleMessageSafe(msg) {
     const isAdmin = isAdminCheck(s);
     const contact = await msg.getContact().catch(() => null);
     const name = contact?.pushname || contact?.name || msg._data?.notifyName || (s.phoneId || s.lid || "unknown");
-
     const keyId = s.phoneId || s.lid || (msg.author || msg.from);
     const player = getPlayer(keyId, name);
-
-    // Yeni alanları garantiye al
-    if (typeof player.crystals !== "number") player.crystals = 0;
-    ensureCosmetics(player);
 
     if (player.stack <= 0) {
       player.stack = AUTO_TOPUP;
@@ -1669,7 +425,14 @@ async function handleMessageSafe(msg) {
     const args = body.split(/\s+/);
     const base = args[0]?.toLowerCase();
 
-    if (body.toLowerCase() === "ping") { await msg.reply("pong"); return; }
+    // Basit ping
+    if (body.toLowerCase() === "ping") {
+      await msg.reply("pong");
+      return;
+    }
+
+    if (!base.startsWith(".")) return; // komut değilse
+
     if (base === ".me") {
       return msg.reply(
         `name: ${player.name || "-"}\n` +
@@ -1680,1214 +443,609 @@ async function handleMessageSafe(msg) {
         `isAdmin: ${isAdmin}`
       );
     }
-    if (base === ".state") {
-      const g = games[keyGame];
-      return msg.reply(g ? `Game var: bet=${g.bet} | P=[${g.playerHand?.length||0}] D=[${g.dealerHand?.length||0}]` : "Game yok.");
-    }
 
-    if (base === ".owo") {
-      return msg.reply(OWO_HELP);
-    }
-
-    /* ==================== EVENT BUFF ==================== */
-    if (base === ".eventbuff" || base === ".etkinlik") {
-      if (!isAdmin) return msg.reply("🚫 Bu komut için yetkin yok.");
-      const sub = (args[1] || "").toLowerCase();
-
-      if (sub === "off" || sub === "kapat" || sub === "bitir" || sub === "stop") {
-        eventBuff.active = false;
-        eventBuff.until = 0;
-        return msg.reply("⚡ Etkinlik buff'ı manuel olarak kapatıldı.");
-      }
-
-      if (isEventBuffActive()) {
-        return msg.reply(
-`⚡ Zaten bir etkinlik buff'ı açık.
-Kalan süre: ${eventBuffRemainingText()}
-Kapatmak için: .eventbuff off`
-        );
-      }
-
-      const DURATION_MIN = 15;
-      eventBuff.active = true;
-      eventBuff.until = Date.now() + DURATION_MIN * 60 * 1000;
-
-      return msg.reply(
-`⚡ *Etkinlik Başladı!*
-
-Önümüzdeki ${DURATION_MIN} dakika boyunca:
-• .hunt kazançları arttı
-• .kutu ödülleri buff aldı
-• Kutulardan *kristal* düşme ihtimali yükseldi 💎
-
-Mevcut durum: ${eventBuffRemainingText()}
-Kapatmak için: .eventbuff off`
-      );
-    }
-
-    /* ==================== PET SİSTEMİ ==================== */
-    if (base === ".pet") {
-      if (!(await requireJoined(msg, player))) return;
-      ensurePet(player);
-      if (typeof player.crystals !== "number") player.crystals = 0;
-
-      const sub = (args[1] || "").toLowerCase();
-
-      if (sub === "shop" || sub === "market" || sub === "magaza" || sub === "mağaza") {
-        const buyableList = Object.values(PET_SHOP)
-          .filter(p => p.buyable)
-          .sort((a, b) => a.price - b.price)
-          .map(p => {
-            const cPrice = PET_CRYSTAL_PRICES[p.key] ?? null;
-            const crystalLine = cPrice ? `   💎 Kristal Fiyat: ${cPrice}\n` : "";
-            return (
-`${p.emoji} *${p.label}*
-   💰 Çip Fiyat: ${p.price} çip
-${crystalLine}   ATK: ${p.atk} | LUCK: ${p.luck}
-   ${p.desc}`
-            );
-          })
-          .join("\n\n");
-
-        const specialList = ["kaplumbaga","salyangoz","koala"]
-          .map(k => PET_SHOP[k])
-          .filter(Boolean)
-          .map(p => {
-            const cPrice = PET_CRYSTAL_PRICES[p.key] ?? null;
-            const crystalLine = cPrice ? `   💎 Kristal Fiyat: ${cPrice}\n` : "";
-            return (
-`${p.emoji} *${p.label}* (Özel)
-${crystalLine}   ATK: ${p.atk} | LUCK: ${p.luck}
-   ${p.desc}`
-            );
-          })
-          .join("\n\n");
-
-        let adminLine = "";
-        if (isAdmin) {
-          adminLine =
-`\n\n👑 *Admin’e Özel Pet*:
-${ADMIN_PET.emoji} *${ADMIN_PET.label}*
-   ATK: ${ADMIN_PET.atk} | LUCK: ${ADMIN_PET.luck}
-   Sadece: .pet adminkurt komutuyla alınabilir.`;
-        }
-
-        return msg.reply(
-`🐾 *PET SHOP* 🐾
-
-💠 *Satın Alınabilen Petler (Çip & Kristal)*
-
-${buyableList}
-
-💠 *Özel Petler (Kristal ile alınabilir)*
-
-${specialList || "—"}
-
-💎 *Kristal ile pet almak için:*
-• .pet al kedi kristal
-• .pet al koala kristal
-
-📌 Çip ile almak için:
-.pet al <tür>
-Örn:
-• .pet al kedi
-• .pet al panda${adminLine}`
-        );
-      }
-
-      if (!sub) {
-        const power = getPetPower(player);
-        if (!power.active) {
-          const shopLines = Object.values(PET_SHOP)
-            .filter(p => p.buyable)
-            .sort((a, b) => a.price - b.price)
-            .map(p => {
-              const cPrice = PET_CRYSTAL_PRICES[p.key] ?? null;
-              const crystalLine = cPrice ? ` | 💎 ${cPrice} kristal` : "";
-              return `${p.emoji} *${p.label}* — ${p.price} çip${crystalLine}\n   ATK: ${p.atk} | LUCK: ${p.luck}`;
-            }).join("\n\n");
-
-          return msg.reply(
-`🐾 *Pet Sistemi*
-
-Şu an bir petin yok.
-
-Pet alarak:
-• .hunt kazancına (ATK) bonus alırsın
-• Kutularda ve hunt kutu düşme şansında (LUCK) bonus alırsın
-
-📦 *Pet Shop*:
-${shopLines}
-
-Özel petler (sadece kristal):
-• 🐢 Kaplumbağa
-• 🐌 Salyangoz
-• 🐨 Koala
-
-💎 Kristal ile almak için:
-.pet al <tür> kristal
-Örn:
-• .pet al koala kristal`
-          );
-        } else {
-          const { active, others, atk, luck } = power;
-          const def = PET_SHOP[active.type];
-          const emoji = def?.emoji || (active.type === ADMIN_PET.key ? ADMIN_PET.emoji : "🐾");
-          const nameLine = getPetDisplayName(active);
-
-          let specialInfo = "";
-          if (active.type === "salyangoz") {
-            specialInfo =
-`\n\n⭐ *Özel Özellik (Salyangoz)*:
-• Hunt'ta kutu/drop şansını arttırır.`;
-          } else if (active.type === "koala") {
-            specialInfo =
-`\n\n⭐ *Özel Özellik (Koala)*:
-• Bot açık olduğu sürece her 30 dakikada bir sana +3000 çip pasif gelir kazandırır.`;
-          } else if (active.type === "kaplumbaga") {
-            specialInfo =
-`\n\n⭐ *Özel Özellik (Kaplumbağa)*:
-• Koleksiyon peti, sadece vitrin ve pasif güç için.`;
-          } else if (active.type === ADMIN_PET.key) {
-            specialInfo =
-`\n\n⭐ *Özel Özellik (Alfa Kurt)*:
-• Admin'e özel efsane pet.`;
-          }
-
-          const othersLine = others.length
-            ? `\nDiğer petlerin (pasif %15): ${others.map(p => getPetDisplayName(p)).join(", ")}`
-            : "";
-
-          return msg.reply(
-`${emoji} *Pet Bilgilerin*
-
-Aktif Pet: ${nameLine}
-Tür: ${active.type || "-"}
-Seviye: ${active.level || 1}
-XP: ${active.xp || 0}
-Aktif ATK: ${active.atk || 0}
-Aktif LUCK: ${active.luck || 0}
-
-Toplam (aktif + pasif %15) güç:
-ATK: ~${Math.round(atk)}
-LUCK: ~${Math.round(luck)}${othersLine}${specialInfo}
-
-İsim değiştirmek için:
-.pet isim <yeni_isim>
-
-💎 Toplam kristalin: ${player.crystals}`
-          );
-        }
-      }
-
-      if (sub === "liste") {
-        ensurePet(player);
-        const pets = player.pets || [];
-        if (!pets.length) {
-          return msg.reply("🐾 Henüz hiç petin yok. `.pet al <tür>` ile alabilirsin.");
-        }
-        const lines = pets.map((p, i) => {
-          const def = PET_SHOP[p.type];
-          const emoji = def?.emoji || "🐾";
-          const activeMark = (i === player.activePetIndex) ? " (aktif)" : "";
-          const cPrice = PET_CRYSTAL_PRICES[p.type] ?? null;
-          const crystalInfo = cPrice ? ` | (Kristal değeri: ~${cPrice})` : "";
-          return `${i+1}. ${emoji} ${getPetDisplayName(p)} — ATK: ${p.atk || 0}, LUCK: ${p.luck || 0}${activeMark}${crystalInfo}`;
-        }).join("\n");
-        return msg.reply(
-`🐾 *Petlerin*
-
-${lines}
-
-Aktif peti değiştirmek için:
-.pet set <numara>`);
-      }
-
-      if (sub === "set" || sub === "sec" || sub === "seç") {
-        const idxStr = args[2];
-        if (!idxStr) return msg.reply("Kullanım: `.pet set <numara>`\nListe için: `.pet liste`");
-        const idx = parseInt(idxStr, 10);
-        ensurePet(player);
-        const pets = player.pets || [];
-        if (!Number.isFinite(idx) || idx < 1 || idx > pets.length) {
-          return msg.reply("⚠️ Geçerli bir pet numarası gir.\nListe için: `.pet liste`");
-        }
-        player.activePetIndex = idx - 1;
-        player.pet = pets[player.activePetIndex];
-        await saveDB();
-        return msg.reply(`🐾 Aktif petin artık: ${getPetDisplayName(player.pet)}`);
-      }
-
-      if (sub === "adminkurt" || sub === "adminpet" || sub === "admin") {
-        if (!isAdmin) {
-          return msg.reply("🚫 Bu pet sadece yöneticiler içindir.");
-        }
-        ensurePet(player);
-        const pet = grantPet(player, ADMIN_PET.key);
-        if (pet) {
-          player.pet = pet;
-        } else {
-          const idx = player.pets.findIndex(p => p.type === ADMIN_PET.key);
-          if (idx !== -1) {
-            player.activePetIndex = idx;
-            player.pet = player.pets[idx];
-          }
-        }
-        if (player.pet) {
-          player.pet.atk = ADMIN_PET.atk;
-          player.pet.luck = ADMIN_PET.luck;
-        }
-        await saveDB();
-        await checkAndUnlockTitles(msg, player);
-
-        return msg.reply(
-`${ADMIN_PET.emoji} *Admin Peti Verildi!*
-
-
-Artık *${ADMIN_PET.label}* senin yanında:
-ATK: ${ADMIN_PET.atk}
-LUCK: ${ADMIN_PET.luck}
-
-Bu peti sadece adminler alabilir.
-🏦 Bakiye değişmedi: ${player.stack}`
-        );
-      }
-
-      if (sub === "al" || sub === "buy") {
-        const rawType = args[2];
-        const method = normalizeTR(args[3] || "");
-        if (!rawType) {
-          return msg.reply(
-`Kullanım: .pet al <tür> [kristal]
-
-Örnek türler:
-• cekirge
-• karinca
-• panda
-• keci
-• at
-• zebra
-• kedi
-• tavsan
-• kopek
-• kartal
-• suaygiri
-• fil
-• tilki
-• gergedan
-• cita
-• aslan
-• ejderha
-
-Özel petler (sadece kristal ile mantıklı):
-• kaplumbaga
-• salyangoz
-• koala
-
-Örnek:
-• .pet al kedi
-• .pet al koala kristal`
-          );
-        }
-
-        const typeKey = petTypeFromInput(rawType) || normalizeTR(rawType);
-        const cfg = PET_SHOP[typeKey];
-
-        if (!cfg && !["kaplumbaga","salyangoz","koala"].includes(typeKey)) {
-          return msg.reply("⚠️ Geçersiz pet türü.");
-        }
-
-        const payWithCrystal = method === "kristal" || method === "k" || method === "crystal";
-        const crystalPrice = PET_CRYSTAL_PRICES[typeKey];
-
-        if (payWithCrystal) {
-          if (crystalPrice == null) {
-            return msg.reply("⚠️ Bu pet kristal ile satın alınamaz.");
-          }
-          if (player.crystals < crystalPrice) {
-            return msg.reply(`🚫 Yetersiz kristal. Gerekli: ${crystalPrice}, Senin: ${player.crystals}`);
-          }
-        } else {
-          if (!cfg || cfg.buyable === false) {
-            return msg.reply("⚠️ Bu pet çip ile satın alınamaz, kristal ile dene: `.pet al <tür> kristal`");
-          }
-          if (player.stack < cfg.price) {
-            return msg.reply(`🚫 Yetersiz bakiye. Gerekli: ${cfg.price}, Senin: ${player.stack}`);
-          }
-        }
-
-        ensurePet(player);
-
-        if (payWithCrystal) {
-          player.crystals -= crystalPrice;
-        } else {
-          player.stack -= cfg.price;
-        }
-
-        const def = cfg || PET_SHOP[typeKey];
-        if (!def) {
-          return msg.reply("⚠️ İçsel pet tanımı bulunamadı.");
-        }
-
-        const pet = {
-          type: def.key,
-          name: def.label,
-          level: 1,
-          xp: 0,
-          atk: def.atk,
-          luck: def.luck
-        };
-
-        if (hasPetType(player, def.key)) {
-          // Zaten varsa sadece aktif yap
-          const idx = player.pets.findIndex(p => p.type === def.key);
-          if (idx !== -1) player.activePetIndex = idx;
-        } else {
-          player.pets.push(pet);
-          if (player.activePetIndex === -1) player.activePetIndex = player.pets.length - 1;
-        }
-        player.pet = player.pets[player.activePetIndex];
-
-        await saveDB();
-        await checkAndUnlockTitles(msg, player);
-
-        const payText = payWithCrystal
-          ? `💎 Ödenen kristal: ${crystalPrice}\n💎 Kalan kristal: ${player.crystals}`
-          : `🏦 Kalan Bakiye: ${player.stack}`;
-
-        return msg.reply(
-`${def.emoji} *Pet Satın Alındı!* (Tür: ${def.label})
-
-ATK: ${def.atk}
-LUCK: ${def.luck}
-
-Petin:
-• .hunt kazancını artırır
-• Kutulardaki ödüle bonus ekler
-
-İsim vermek için:
-.pet isim <yeni_isim>
-
-${payText}`
-        );
-      }
-
-      if (sub === "isim" || sub === "name") {
-        ensurePet(player);
-        if (!player.pet) {
-          return msg.reply("Şu an bir petin yok. Önce `.pet al <tür>` veya admin isen `.pet adminkurt` ile pet al.");
-        }
-        const newName = args.slice(2).join(" ").trim();
-        if (!newName) {
-          return msg.reply("Kullanım: `.pet isim <yeni_isim>`");
-        }
-        if (newName.length > 24) {
-          return msg.reply("⚠️ İsim çok uzun. Maksimum 24 karakter kullan.");
-        }
-        player.pet.name = newName;
-        await saveDB();
-        return msg.reply(`🐾 Petinin yeni adı: *${newName}*`);
-      }
-
-      return msg.reply(
-`🐾 Pet komutları:
-• .pet — Pet durumunu göster
-• .pet al <tür> [kristal] — Pet satın al
-• .pet liste — Tüm petlerini listele
-• .pet set <numara> — Aktif pet seç
-• .pet shop — Tüm petleri ve kristal/çip fiyatlarını gör
-• .pet adminkurt — (Sadece admin) özel Alfa Kurt peti
-• .pet isim <yeni_isim> — Petine isim ver`);
-    }
-
-    if (base === ".pets") {
-      if (!(await requireJoined(msg, player))) return;
-      ensurePet(player);
-      const pets = player.pets || [];
-      if (!pets.length) {
-        return msg.reply("🐾 Henüz hiç petin yok. `.pet al <tür>` ile pet satın alabilirsin.");
-      }
-
-      const lines = pets.map((p, i) => {
-        const def = PET_SHOP[p.type];
-        const emoji = def?.emoji || (p.type === ADMIN_PET.key ? ADMIN_PET.emoji : "🐾");
-        const activeMark = (i === player.activePetIndex) ? " ⭐ (Aktif)" : "";
-        const name = getPetDisplayName(p);
-        const level = p.level || 1;
-        const atk = p.atk || 0;
-        const luck = p.luck || 0;
-        const xp = p.xp || 0;
-        const cPrice = PET_CRYSTAL_PRICES[p.type] ?? null;
-        const crystalInfo = cPrice ? `\n   • Tahmini kristal değeri: ~${cPrice}` : "";
-        return `${i + 1}. ${emoji} *${name}*${activeMark}
-   • Tür: ${p.type || "-"}
-   • Seviye: ${level}
-   • XP: ${xp}
-   • ATK: ${atk}
-   • LUCK: ${luck}${crystalInfo}`;
-      }).join("\n\n");
-
-      return msg.reply(
-`🐾 *Pet Koleksiyonun* 🐾
-
-${lines}
-
-🔹 Aktif peti değiştirmek için:
-.pet set <numara>
-
-🔹 Detay görmek için:
-.pet`);
-    }
-
-    /* Grup admin araçları (everyone / kilit) aynı kalıyor */
-    if (base === "!everyone" || base === "!kilit" || base === "!kilitaç" || base === "!kilitac") {
-      const { isGroup, isGroupAdmin, chat } = await isGroupAdminByMsg(msg);
-      if (!isGroup) return msg.reply("ℹ️ Bu komut sadece *gruplarda* kullanılabilir.");
-
-      const canModerate = isAdmin || isGroupAdmin;
-      if ((base === "!kilit" || base === "!kilitaç" || base === "!kilitac") && !canModerate) {
-        return msg.reply("🚫 Bu komut için grup yöneticisi olmalısın (ya da bot admini).");
-      }
-
-      if (base === "!everyone") {
-        try {
-          const participants = chat.participants || [];
-          if (!participants.length) return msg.reply("⚠️ Grup katılımcıları alınamadı.");
-          const mentionContacts = await Promise.all(
-            participants.map(p => client.getContactById(p.id._serialized))
-          );
-          const tagLine = participants.map(p => `@${p.id.user}`).join(" ");
-          const extra = args.slice(1).join(" ").trim();
-          const text = (extra ? `${extra}\n` : "") + tagLine;
-          await chat.sendMessage(text, { mentions: mentionContacts });
-        } catch (e) {
-          console.error("!everyone hatası:", e);
-          await msg.reply("⚠️ everyone gönderilemedi.");
-        }
-        return;
-      }
-
-      if (base === "!kilit") {
-        try {
-          await chat.setMessagesAdminsOnly(true);
-          await msg.reply("🔒 Grup *sadece yöneticilere* kilitlendi.");
-        } catch (e) {
-          console.error("!kilit hatası:", e);
-          await msg.reply("⚠️ Kilitlenemedi. Botun *grup yöneticisi* olması gerekebilir.");
-        }
-        return;
-      }
-
-      if (base === "!kilitaç" || base === "!kilitac") {
-        try {
-          await chat.setMessagesAdminsOnly(false);
-          await msg.reply("🔓 Grup yeniden *herkese* açıldı.");
-        } catch (e) {
-          console.error("!kilitaç hatası:", e);
-          await msg.reply("⚠️ Kilit açılamadı. Botun *grup yöneticisi* olması gerekebilir.");
-        }
-        return;
-      }
+    if (base === ".yardım" || base === ".yardim" || base === ".help") {
+      return msg.reply(buildHelpText(isAdmin));
     }
 
     if (base === ".join") {
       if (player.joined) {
-        const activeTitleName = getActiveTitleName(player);
-        const titleLine = activeTitleName ? `\n🎖 Unvan: ${activeTitleName}` : "";
-        return msg.reply(`✅ Zaten katıldın.\n🏦 Bakiye: ${player.stack}${titleLine}`);
+        return msg.reply(`✅ Zaten katıldın.\n🏦 Bakiye: ${player.stack}`);
       }
       player.joined = true;
       await saveDB();
-      await checkAndUnlockTitles(msg, player);
       return msg.reply(
 `🎟 *Oyuna katıldın!*
 Hoş geldin ${player.name || ""} 🎉
 🏦 Başlangıç bakiyen: ${player.stack}
-Skor tablosunda görünürsün. Bol şans!`
+Bol şans!`
       );
     }
 
-    if (
-      base === ".yardım" || base === ".yardim" ||
-      (base === ".bj" && ["yardım","yardim","help","menu","menü"].includes((args[1]||"").toLowerCase()))
-    ) {
-      return msg.reply(buildHelpText(isAdmin));
+    // Oyuna katılmadan çoğu komutu engelle
+    const needJoinCommands = [".bakiye",".profil",".stats",".günlük",".gunluk",".slot",".rulet",".bj",".hit",".stand",".db",".hunt",".kutu",".kristal"];
+    if (needJoinCommands.includes(base) && !player.joined) {
+      return msg.reply("🎟 Oyuna katılmak için önce `.join` yaz.");
     }
 
-    /* ========== PROFİL (tema + kristal entegre) ========== */
-    if (base === ".profil" || base === ".profile") {
-      return msg.reply(renderProfile(player, isAdmin));
+    if (base === ".bakiye") {
+      return msg.reply(`🏦 Bakiye: ${player.stack}\n💎 Kristal: ${player.crystals}`);
     }
 
-    /* ========== DETAYLI / GLOBAL İSTATİSTİK ========== */
-    if (
-      base === ".istatistik" ||
-      base === ".istatistikler" ||
-      base === ".istatistic" ||
-      base === ".stats"
-    ) {
-      const sub = (args[1] || "").toLowerCase();
-
-      if (base === ".stats" && (sub === "all" || sub === "genel" || sub === "global")) {
-        const allPlayers = Object.values(db.data.players || {});
-        let totalPlayers = allPlayers.length;
-        let joinedPlayers = 0;
-        let totalStack = 0;
-
-        let totalSlotGames = 0;
-        let totalSlotNetWin = 0;
-        let totalRouletteGames = 0;
-        let totalRouletteWins = 0;
-        let totalRouletteLosses = 0;
-        let totalBjGames = 0;
-        let totalBjWins = 0;
-        let totalBjLosses = 0;
-        let totalHuntCount = 0;
-        let totalHuntProfit = 0;
-        let totalBoxesOpened = 0;
-        let totalBoxesInventory = 0;
-        let totalDailyDays = 0;
-        let totalCrystals = 0;
-
-        for (const p of allPlayers) {
-          ensureStats(p);
-          ensureInventory(p);
-          if (typeof p.crystals !== "number") p.crystals = 0;
-
-          totalStack += p.stack || 0;
-          totalCrystals += p.crystals || 0;
-          if (p.joined) joinedPlayers++;
-
-          const s2 = p.stats || {};
-          totalSlotGames      += s2.slotGames       || 0;
-          totalSlotNetWin     += s2.slotNetWin      || 0;
-          totalRouletteGames  += s2.rouletteGames   || 0;
-          totalRouletteWins   += s2.rouletteWins    || 0;
-          totalRouletteLosses += s2.rouletteLosses  || 0;
-          totalBjGames        += s2.bjGames         || 0;
-          totalBjWins         += s2.bjWins          || 0;
-          totalBjLosses       += s2.bjLosses        || 0;
-          totalHuntCount      += s2.huntCount       || 0;
-          totalHuntProfit     += s2.huntProfit      || 0;
-          totalBoxesOpened    += s2.boxesOpened     || 0;
-          totalDailyDays      += s2.dailyDays       || 0;
-          totalBoxesInventory += (p.inv && p.inv.boxes) || 0;
-        }
-
-        const avgStack = totalPlayers ? Math.round(totalStack / totalPlayers) : 0;
-
-        return msg.reply(
-`📊 *GLOBAL OYUN İSTATİSTİKLERİ* 📊
-
-👥 Toplam kayıtlı oyuncu: ${totalPlayers}
-🟢 Oyuna katılmış oyuncu: ${joinedPlayers}
-💰 Toplam bakiye: ${totalStack}
-💳 Oyuncu başı ortalama bakiye: ${avgStack}
-💎 Toplam kristal: ${totalCrystals}
-
-🎰 *Slot*
-• Toplam oyun: ${totalSlotGames}
-• Toplam net kazanç: ${totalSlotNetWin}
-
-🎡 *Rulet*
-• Toplam oyun: ${totalRouletteGames}
-• Kazanma: ${totalRouletteWins}
-• Kaybetme: ${totalRouletteLosses}
-
-🃏 *Blackjack*
-• Toplam el: ${totalBjGames}
-• Kazanma: ${totalBjWins}
-• Kaybetme: ${totalBjLosses}
-
-🏹 *Hunt*
-• Toplam hunt: ${totalHuntCount}
-• Toplam kazanç: ${totalHuntProfit}
-
-🎁 *Kutu*
-• Toplam açılan kutu: ${totalBoxesOpened}
-• Envanterdeki kutular: ${totalBoxesInventory}
-
-📅 *Günlük*
-• Toplam alınan günlük ödül: ${totalDailyDays}`
-        );
-      }
-
-      if (!(await requireJoined(msg, player))) return;
-
+    if (base === ".profil") {
       ensureStats(player);
       ensureInventory(player);
-      ensurePet(player);
-      ensureTitles(player);
-
-      const s = player.stats || {};
+      const s2 = player.stats;
       const { level, totalXp } = calculatePlayerLevel(player);
-
-      const rouletteWinRate = s.rouletteGames
-        ? Math.round((s.rouletteWins / s.rouletteGames) * 100)
-        : 0;
-
-      const bjWinRate = s.bjGames
-        ? Math.round((s.bjWins / s.bjGames) * 100)
-        : 0;
-
-      const avgHuntProfit = s.huntCount
-        ? Math.round(s.huntProfit / s.huntCount)
-        : 0;
-
-      const titlesCount = (player.titles?.owned?.length) || 0;
-      const petsCount = (player.pets?.length) || 0;
-      const boxesOwned = player.inv?.boxes || 0;
-
       return msg.reply(
-`📊 *Detaylı İstatistikler*
+`👤 *Profil Bilgileri*
 
-👤 Oyuncu: ${player.name || "-"}
+Ad: ${player.name || "-"}
 🏦 Bakiye: ${player.stack}
 💎 Kristal: ${player.crystals}
 ⭐ Seviye: ${level} (XP: ${totalXp})
 
-🎰 *Slot*
-• Oynanan oyun: ${s.slotGames}
-• Net kazanç: ${s.slotNetWin}
+📊 *Genel İstatistikler*
+• Slot oyunları: ${s2.slotGames}
+• Slot net kazanç: ${s2.slotNetWin}
+• Rulet galibiyetleri: ${s2.rouletteWins}/${s2.rouletteGames}
+• BJ galibiyetleri: ${s2.bjWins}/${s2.bjGames}
+• Hunt sayısı: ${s2.huntCount}
+• Açılan kutu: ${s2.boxesOpened}
+• Günlük aldığın gün: ${s2.dailyDays}
 
-🎡 *Rulet*
-• Oynanan oyun: ${s.rouletteGames}
-• Kazanma: ${s.rouletteWins}
-• Kaybetme: ${s.rouletteLosses}
-• Kazanma oranı: ${rouletteWinRate}%
-
-🃏 *Blackjack*
-• Oynanan el: ${s.bjGames}
-• Kazanma: ${s.bjWins}
-• Kaybetme: ${s.bjLosses}
-• Kazanma oranı: ${bjWinRate}%
-
-🏹 *Hunt*
-• Hunt sayısı: ${s.huntCount}
-• Toplam kazanç: ${s.huntProfit}
-• Ortalama kazanç: ${avgHuntProfit}
-
-🎁 *Kutu*
-• Açılan kutu: ${s.boxesOpened}
-• Envanterdeki kutu: ${boxesOwned}
-
-📅 *Günlük*
-• Günlük ödül aldığın gün sayısı: ${s.dailyDays}
-
-🎖 Unvan sayısı: ${titlesCount}
-🐾 Pet sayısı: ${petsCount}
-
-ℹ️ Özet görünüm için: .profil`
+🎁 Kutuların: ${player.inv.boxes}`
       );
     }
 
-    /* Buradan sonrası: .seviye, .bakiye, .score, .top seviye,
-       .görev, .unvan, admin para komutları, .bj / .rulet / .slot / .kutu / .hunt / .günlük
-       ve yeni .kristal / .profilskin devam ediyor */
-    // (DEVAMI BÖLÜM 7 / 8'DE)
-  } catch (err) {
-    console.error("Mesaj işleme hatası:", err);
-    try { await msg.reply("⚠️ İç hata oluştu, lütfen tekrar deneyin."); } catch {}
-  }
-}
-/* ==================== Kristal ↔ Çip Ayarları ==================== */
-// 1 kristal kaç çip eder?
-// İstersen burayı değiştirebilirsin.
-const CRYSTAL_TO_CHIP = 50000; // 1 kristal = 50.000 çip
+    if (base === ".stats") {
+      ensureStats(player);
+      const s2 = player.stats;
+      const { level, totalXp } = calculatePlayerLevel(player);
+      return msg.reply(
+`📊 *Detaylı İstatistikler*
 
-/* ==================== Ek Mesaj Dinleyici (Sadece .kristal / .profilskin) ==================== */
-/*
-  handleMessageSafe'e dokunmadan yeni komut eklemek için
-  ayrı bir dinleyici kullanıyoruz. Sadece:
-  - .kristal
-  - .profilskin
-  mesajlarında çalışır, diğerlerine hiç dokunmaz.
-*/
-client.on("message", async (msg) => {
-  try {
-    if (!shouldProcess(msg)) return;
+Oyuncu: ${player.name || "-"}
+Seviye: ${level} (XP: ${totalXp})
 
-    const bodyRaw = (msg.body || "").trim();
-    if (!bodyRaw.startsWith(".")) return; // komut değilse boşver
+🎰 Slot
+• Oyun: ${s2.slotGames}
+• Net kazanç: ${s2.slotNetWin}
 
-    const parts = bodyRaw.split(/\s+/);
-    const base = parts[0].toLowerCase();
+🎡 Rulet
+• Oyun: ${s2.rouletteGames}
+• Kazanma: ${s2.rouletteWins}
+• Kaybetme: ${s2.rouletteLosses}
 
-    // Sadece bu iki komutta çalışsın
-    if (base !== ".kristal" && base !== ".profilskin") return;
+🃏 Blackjack
+• El: ${s2.bjGames}
+• Kazanma: ${s2.bjWins}
+• Kaybetme: ${s2.bjLosses}
 
-    const sender = await resolveSender(msg);
-    const isAdmin = isAdminCheck(sender);
-    const contact = await msg.getContact().catch(() => null);
-    const name =
-      contact?.pushname ||
-      contact?.name ||
-      msg._data?.notifyName ||
-      sender.phoneId ||
-      sender.lid ||
-      "unknown";
+🏹 Hunt
+• Hunt sayısı: ${s2.huntCount}
+• Toplam kazanç: ${s2.huntProfit}
 
-    const keyId = sender.phoneId || sender.lid || (msg.author || msg.from);
-    const player = getPlayer(keyId, name);
+🎁 Kutu
+• Açılan kutu: ${s2.boxesOpened}
+• Envanterdeki kutu: ${player.inv.boxes}
 
-    if (typeof player.crystals !== "number") player.crystals = 0;
-    ensureCosmetics(player);
+📅 Günlük aldığın gün: ${s2.dailyDays}`
+      );
+    }
 
-    /* ========== .KRİSTAL KOMUTU ========== */
+    if (base === ".günlük" || base === ".gunluk") {
+      const today = localDateKey();
+      if (player.lastDaily === today) {
+        return msg.reply("📅 Bugünkü günlük ödülünü zaten aldın.");
+      }
+      player.lastDaily = today;
+      ensureStats(player);
+      player.stats.dailyDays += 1;
+      player.stack += DAILY_REWARD;
+      await saveDB();
+      return msg.reply(
+`🎁 *Günlük Ödül*
+
++${DAILY_REWARD} çip eklendi.
+🏦 Yeni bakiye: ${player.stack}`
+      );
+    }
+
+    if (base === ".slot") {
+      const betStr = args[1];
+      const bet = parseInt(betStr, 10);
+      if (!Number.isFinite(bet) || bet < MIN_BET) {
+        return msg.reply(`Kullanım: .slot <miktar>\nMinimum bahis: ${MIN_BET}`);
+      }
+      if (bet > player.stack) {
+        return msg.reply("🚫 Yetersiz bakiye.");
+      }
+
+      const now = Date.now();
+      const last = lastSlotTimes[keyId] || 0;
+      if (now - last < SLOT_COOLDOWN_MS) {
+        const waitMs = SLOT_COOLDOWN_MS - (now - last);
+        const waitSec = Math.ceil(waitMs / 1000);
+        return msg.reply(`⏳ Slot için biraz bekle: ${waitSec} sn`);
+      }
+      lastSlotTimes[keyId] = now;
+
+      player.stack -= bet;
+      ensureStats(player);
+      player.stats.slotGames += 1;
+
+      const grid = spinSlot();
+      const { totalWin, lines } = checkSlotWin(grid, bet);
+      player.stack += totalWin;
+      player.stats.slotNetWin += (totalWin - bet);
+
+      await saveDB();
+
+      const gridStr = grid.map(row => row.join(" ")).join("\n");
+      const linesStr = lines.length ? lines.join("\n") : "Maalesef kazanç yok.";
+      return msg.reply(
+`🎰 *Slot*
+
+${gridStr}
+
+${linesStr}
+
+🏦 Bakiye: ${player.stack}`
+      );
+    }
+
+    if (base === ".rulet") {
+      if (args.length === 1) {
+        return msg.reply(ROULET_HELP);
+      }
+      const bet = parseInt(args[1], 10);
+      if (!Number.isFinite(bet) || bet < MIN_BET) {
+        return msg.reply(`Kullanım: .rulet <miktar> <seçim>\nMinimum bahis: ${MIN_BET}`);
+      }
+      if (bet > player.stack) {
+        return msg.reply("🚫 Yetersiz bakiye.");
+      }
+      const pick = parseRoulettePick(args.slice(2));
+      if (!pick.ok) return msg.reply(pick.message);
+
+      player.stack -= bet;
+      ensureStats(player);
+      player.stats.rouletteGames += 1;
+
+      const result = rouletteSpin();
+      const color = rouletteColor(result);
+      let win = 0;
+      let text = "";
+
+      if (pick.test(result)) {
+        win = bet * pick.payout;
+        player.stack += bet + win;
+        player.stats.rouletteWins += 1;
+        text = `✅ Kazandın! Bahis: ${bet}, Kazanç: +${win}`;
+      } else {
+        player.stats.rouletteLosses += 1;
+        text = `❌ Kaybettin. Bahis: ${bet}`;
+      }
+
+      await saveDB();
+
+      return msg.reply(
+`🎡 *Rulet*
+
+Seçimin: ${pick.title}
+Gelen sayı: ${result} ${color.dot} (${color.name})
+
+${text}
+
+🏦 Bakiye: ${player.stack}`
+      );
+    }
+
+    if (base === ".bj") {
+      const betStr = args[1];
+      const bet = parseInt(betStr, 10);
+      if (!Number.isFinite(bet) || bet < MIN_BET) {
+        return msg.reply(`Kullanım: .bj <miktar>\nMinimum bahis: ${MIN_BET}`);
+      }
+      if (bet > player.stack) {
+        return msg.reply("🚫 Yetersiz bakiye.");
+      }
+
+      player.stack -= bet;
+      ensureStats(player);
+      player.stats.bjGames += 1;
+
+      const playerHand = [drawCard(), drawCard()];
+      const dealerHand = [drawCard(), drawCard()];
+
+      games[keyGame] = {
+        type: "bj",
+        bet,
+        playerId: keyId,
+        playerHand,
+        dealerHand,
+        finished: false
+      };
+
+      const pVal = getHandValue(playerHand);
+      const dVisible = dealerHand[0];
+
+      await saveDB();
+
+      return msg.reply(
+`🃏 *Blackjack Başladı*
+
+Sen: ${handToDotString(playerHand)} (${valueText(pVal)})
+Dağıtıcı: ${dVisible.value}${suitDot(dVisible.suit)} + 🂠
+
+Komutlar:
+• .hit — Kart çek
+• .stand — Kal
+• .db — Double (bahsi 2x yapıp 1 kart çek)`
+      );
+    }
+
+    if (base === ".hit" || base === ".stand" || base === ".db") {
+      const g = games[keyGame];
+      if (!g || g.type !== "bj" || g.finished) {
+        return msg.reply("🎴 Aktif bir blackjack oyunun yok. `.bj <miktar>` ile başlat.");
+      }
+
+      if (g.playerId !== keyId) {
+        return msg.reply("Bu blackjack eli sana ait değil.");
+      }
+
+      if (base === ".hit") {
+        g.playerHand.push(drawCard());
+        const pVal = getHandValue(g.playerHand);
+        const dVis = g.dealerHand[0];
+        if (pVal > 21) {
+          g.finished = true;
+          await saveDB();
+          ensureStats(player);
+          player.stats.bjLosses += 1;
+          return msg.reply(
+`🃏 *Blackjack*
+
+Sen: ${handToDotString(g.playerHand)} (${valueText(pVal)})
+Dağıtıcı: ${handToDotString(g.dealerHand)} (${getHandValue(g.dealerHand)})
+
+💥 Bust oldun, kaybettin.
+Bahis: ${g.bet}
+
+🏦 Bakiye: ${player.stack}`
+          );
+        }
+        await saveDB();
+        return msg.reply(
+`🃏 *Hit*
+
+Sen: ${handToDotString(g.playerHand)} (${valueText(pVal)})
+Dağıtıcı: ${dVis.value}${suitDot(dVis.suit)} + 🂠
+
+Komutlar:
+• .hit — Kart çek
+• .stand — Kal`
+        );
+      }
+
+      if (base === ".db") {
+        if (player.stack < g.bet) {
+          return msg.reply("💸 Double için yeterli bakiyen yok.");
+        }
+        player.stack -= g.bet;
+        g.bet *= 2;
+        g.playerHand.push(drawCard());
+        let pVal = getHandValue(g.playerHand);
+
+        // Dealer oynar
+        while (getHandValue(g.dealerHand) < 17) {
+          g.dealerHand.push(drawCard());
+        }
+        const dVal = getHandValue(g.dealerHand);
+        g.finished = true;
+
+        let resultText = "";
+        if (pVal > 21) {
+          ensureStats(player); player.stats.bjLosses += 1;
+          resultText = "💥 Bust oldun, kaybettin.";
+        } else if (dVal > 21 || pVal > dVal) {
+          const win = g.bet * 2;
+          player.stack += win;
+          ensureStats(player); player.stats.bjWins += 1;
+          resultText = `✅ Kazandın! +${win - g.bet} çip (toplam ${win})`;
+        } else if (pVal === dVal) {
+          player.stack += g.bet;
+          resultText = "🤝 Berabere, bahis iade.";
+        } else {
+          ensureStats(player); player.stats.bjLosses += 1;
+          resultText = "❌ Kaybettin.";
+        }
+
+        await saveDB();
+        return msg.reply(
+`🃏 *Blackjack — Double*
+
+Sen: ${handToDotString(g.playerHand)} (${valueText(pVal)})
+Dağıtıcı: ${handToDotString(g.dealerHand)} (${valueText(dVal)})
+
+Bahis (2x): ${g.bet}
+${resultText}
+
+🏦 Bakiye: ${player.stack}`
+        );
+      }
+
+      if (base === ".stand") {
+        // Dealer oynar
+        while (getHandValue(g.dealerHand) < 17) {
+          g.dealerHand.push(drawCard());
+        }
+        const pVal = getHandValue(g.playerHand);
+        const dVal = getHandValue(g.dealerHand);
+        g.finished = true;
+
+        let resultText = "";
+        if (dVal > 21 || pVal > dVal) {
+          const win = g.bet * 2;
+          player.stack += win;
+          ensureStats(player); player.stats.bjWins += 1;
+          resultText = `✅ Kazandın! +${win - g.bet} çip (toplam ${win})`;
+        } else if (pVal === dVal) {
+          player.stack += g.bet;
+          resultText = "🤝 Berabere, bahis iade.";
+        } else {
+          ensureStats(player); player.stats.bjLosses += 1;
+          resultText = "❌ Kaybettin.";
+        }
+
+        await saveDB();
+        return msg.reply(
+`🃏 *Blackjack — Stand*
+
+Sen: ${handToDotString(g.playerHand)} (${valueText(pVal)})
+Dağıtıcı: ${handToDotString(g.dealerHand)} (${valueText(dVal)})
+
+Bahis: ${g.bet}
+${resultText}
+
+🏦 Bakiye: ${player.stack}`
+        );
+      }
+    }
+
+    if (base === ".hunt") {
+      const now = Date.now();
+      const last = lastHuntTimes[keyId] || 0;
+      if (now - last < HUNT_COOLDOWN_MS) {
+        const waitMs = HUNT_COOLDOWN_MS - (now - last);
+        const waitSec = Math.ceil(waitMs / 1000);
+        return msg.reply(`⏳ Hunt için biraz bekle: ${waitSec} sn`);
+      }
+      lastHuntTimes[keyId] = now;
+
+      const gain = randInt(200, 800);
+      const boxChance = Math.random();
+      let gotBox = false;
+      if (boxChance < 0.25) { // %25 kutu
+        player.inv.boxes += 1;
+        gotBox = true;
+      }
+
+      ensureStats(player);
+      player.stack += gain;
+      player.stats.huntCount += 1;
+      player.stats.huntProfit += gain;
+
+      await saveDB();
+
+      return msg.reply(
+`🏹 *Hunt sonucu*
+
+Kazanç: +${gain} çip
+${gotBox ? "🎁 1 kutu kazandın!" : "Bu sefer kutu çıkmadı."}
+
+🏦 Bakiye: ${player.stack}
+🎁 Kutuların: ${player.inv.boxes}`
+      );
+    }
+
+    if (base === ".kutu") {
+      if (player.inv.boxes <= 0) {
+        return msg.reply("🎁 Hiç kutun yok. Hunt yaparak kutu kazanabilirsin: `.hunt`");
+      }
+
+      let openAll = false;
+      if (args[1] && args[1].toLowerCase() === "all") openAll = true;
+
+      let count = openAll ? player.inv.boxes : 1;
+      let totalGain = 0;
+      let crystalGain = 0;
+      let specialPet = [];
+
+      for (let i = 0; i < count; i++) {
+        const gain = randInt(500, 2000);
+        totalGain += gain;
+        const r = Math.random();
+        if (r < 0.05) { // %5 kristal
+          crystalGain += 1;
+        }
+        // özel pet şansını sadece metin olarak yazacağız
+        const sp = Math.random();
+        if (sp < SPECIAL_DROP_RATES.koala) specialPet.push("🐨 Koala");
+        else if (sp < SPECIAL_DROP_RATES.koala + SPECIAL_DROP_RATES.salyangoz) specialPet.push("🐌 Salyangoz");
+        else if (sp < SPECIAL_DROP_RATES.koala + SPECIAL_DROP_RATES.salyangoz + SPECIAL_DROP_RATES.kaplumbaga) specialPet.push("🐢 Kaplumbağa");
+      }
+
+      player.inv.boxes -= count;
+      ensureStats(player);
+      player.stats.boxesOpened += count;
+      player.stack += totalGain;
+      player.crystals += crystalGain;
+
+      await saveDB();
+
+      let petText = specialPet.length ? `\n⭐ Özel: ${specialPet.join(", ")}` : "";
+      return msg.reply(
+`🎁 *Kutu Açma*
+
+Açılan kutu: ${count}
+Toplam çip kazancı: +${totalGain}
+Kristal kazancı: +${crystalGain}${petText}
+
+🏦 Bakiye: ${player.stack}
+💎 Kristal: ${player.crystals}
+🎁 Kalan kutu: ${player.inv.boxes}`
+      );
+    }
+
     if (base === ".kristal") {
-      const sub = (parts[1] || "").toLowerCase();
-
-      // Sadece bakiyeyi görmek
+      const sub = (args[1] || "").toLowerCase();
       if (!sub) {
         return msg.reply(
 `💎 *Kristal Durumu*
 
 Oyuncu: ${player.name || "-"}
-
 💎 Kristal: ${player.crystals}
-💰 1 kristal ≈ ${CRYSTAL_TO_CHIP.toLocaleString("tr-TR")} çip
+1 kristal = ${CRYSTAL_TO_CHIP} çip
 
 Kristali çipe çevirmek için:
-• .kristal bozdur <miktar>
-  Örnek: .kristal bozdur 3
-• Tümünü bozdurmak için: .kristal bozdur max`
+.kristal bozdur <miktar>
+Örn: .kristal bozdur 3
+.kristal bozdur max`
         );
       }
-
-      if (sub === "bozdur" || sub === "boz" || sub === "convert") {
-        const rawAmount = (parts[2] || "").toLowerCase();
-
+      if (sub === "bozdur" || sub === "boz") {
+        const rawAmount = (args[2] || "").toLowerCase();
         if (!rawAmount) {
           return msg.reply(
 `Kullanım:
-• .kristal bozdur <miktar>
-Örnek:
-• .kristal bozdur 3
-• .kristal bozdur max`
+.kristal bozdur <miktar>
+Örn:
+.kristal bozdur 2
+.kristal bozdur max`
           );
         }
-
         let amount;
         if (rawAmount === "max" || rawAmount === "hepsi" || rawAmount === "all") {
           amount = player.crystals;
         } else {
           amount = parseInt(rawAmount, 10);
         }
-
         if (!Number.isFinite(amount) || amount <= 0) {
           return msg.reply("⚠️ Geçerli bir kristal miktarı gir.");
         }
-        if (player.crystals < amount) {
-          return msg.reply(
-`🚫 Yetersiz kristal.
-Elindeki: ${player.crystals}
-İstediğin: ${amount}`
-          );
+        if (amount > player.crystals) {
+          return msg.reply(`🚫 Yetersiz kristal. Senin: ${player.crystals}, İstenen: ${amount}`);
         }
-
         const chipGain = amount * CRYSTAL_TO_CHIP;
         player.crystals -= amount;
         player.stack += chipGain;
         await saveDB();
-
         return msg.reply(
-`✅ *Kristal Bozduruldu!*
+`✅ *Kristal Bozduruldu*
 
-Bozdurulan kristal: ${amount}
-💰 Kazanılan çip: ${chipGain.toLocaleString("tr-TR")}
+Bozdurulan: ${amount} kristal
+Kazanç: +${chipGain} çip
 
-🔹 Güncel durum:
-💎 Kristal: ${player.crystals}
-🏦 Bakiye: ${player.stack.toLocaleString("tr-TR")}`
+💎 Kalan kristal: ${player.crystals}
+🏦 Bakiye: ${player.stack}`
         );
       }
 
       return msg.reply(
 `💎 *Kristal Komutları*
-
-• .kristal
-   → Mevcut kristal bakiyeni ve oranı gösterir.
-
-• .kristal bozdur <miktar>
-   → Kristali çipe çevirir.
-   Örnek: .kristal bozdur 2
-
-• .kristal bozdur max
-   → Tüm kristallerini çipe çevirir.`
+.kristal — Durumu gösterir
+.kristal bozdur <miktar>
+.kristal bozdur max`
       );
     }
 
-    /* ========== .PROFİLSKİN KOMUTU (Profil Temaları) ========== */
-    if (base === ".profilskin" || base === ".profiltema" || base === ".tema") {
-      const sub = (parts[1] || "").toLowerCase();
-      const cosmetics = player.cosmetics || {};
-      const ownedSkins = cosmetics.ownedSkins || [];
-      const activeSkin = cosmetics.activeSkin || "default";
-
-      // Yardım fonksiyonu: shop listesini yazdırmak
-      const buildSkinShopText = () => {
-        if (!PROFILE_SKINS || typeof PROFILE_SKINS !== "object") {
-          return "⚠️ Tema sistemi şu an tanımlı değil.";
+    /* ===== Admin para komutları ===== */
+    if (isAdmin) {
+      if (base === ".allpman") {
+        for (const p of Object.values(db.data.players)) {
+          p.stack = (p.stack || 0) + 5000;
         }
-
-        const lines = Object.values(PROFILE_SKINS).map((skin) => {
-          const key = skin.key || skin.id || "unknown";
-          const nameLabel = skin.label || skin.name || key;
-          const rarity = skin.rarity || "Normal";
-          const price = skin.priceCrystal ?? skin.crystalPrice ?? 0;
-          const adminOnly = !!skin.adminOnly;
-
-          const has = ownedSkins.includes(key);
-          const isActive = activeSkin === key;
-          const ownedTag = has ? (isActive ? " (SENİN – AKTİF)" : " (SENİN)") : "";
-          const priceLine = price > 0 ? `💎 ${price} kristal` : "✅ Ücretsiz";
-          const adminLine = adminOnly ? " | 👑 Sadece admin" : "";
-
-          return `🔹 *${nameLabel}* [${rarity}]${ownedTag}
-   Anahtar: ${key}
-   Fiyat: ${priceLine}${adminLine}`;
-        }).join("\n\n");
-
-        return (
-`🎨 *Profil Tema Mağazası*
-
-Mevcut kristalin: ${player.crystals}
-
-${lines}
-
-Tema almak için:
-• .profilskin al <anahtar>
-
-Aktif temayı değiştirmek için:
-• .profilskin set <anahtar>
-
-Örnek:
-• .profilskin al nadir
-• .profilskin set efsanevi`
-        );
-      };
-
-      // Hiç alt komut yoksa: shop + aktif tema göster
-      if (!sub || sub === "liste" || sub === "shop" || sub === "magaza" || sub === "mağaza") {
-        const shopText = buildSkinShopText();
-        return msg.reply(shopText);
+        await saveDB();
+        return msg.reply("👑 Herkese +5000 çip verildi.");
+      }
+      if (base === ".alpman") {
+        player.stack += 15000;
+        await saveDB();
+        return msg.reply(`👑 Kendine +15000 çip verdin.\nYeni bakiye: ${player.stack}`);
+      }
+      if (base === ".max") {
+        player.stack = 999999999;
+        await saveDB();
+        return msg.reply(`💸 Bakiye MAX yapıldı: ${player.stack}`);
       }
 
-      // Tema satın alma
-      if (sub === "al" || sub === "buy" || sub === "satınal" || sub === "satinal") {
-        const keyInput = (parts[2] || "").toLowerCase();
-        if (!keyInput) {
-          return msg.reply(
-`Kullanım:
-• .profilskin al <tema_anahtarı>
+      if (base === ".send") {
+        const amountStr = args[1];
+        if (!amountStr) return msg.reply("Kullanım: .send <miktar> @kişi");
+        const amount = parseInt(amountStr, 10);
+        if (!Number.isFinite(amount) || amount <= 0) return msg.reply("Geçerli bir miktar gir.");
+        if (amount > player.stack) return msg.reply("🚫 Yetersiz bakiye.");
 
-Tema listesini görmek için:
-• .profilskin liste`
-          );
+        const mentions = await msg.getMentions();
+        if (!mentions || !mentions.length) {
+          return msg.reply("Bir kişiyi @ ile etiketlemen lazım.");
         }
+        const targetContact = mentions[0];
+        let tNumber = null;
+        try { tNumber = await targetContact.getNumber(); } catch {}
+        const targetId = tNumber ? normPhone(tNumber) : targetContact.id.user;
+        if (!targetId) return msg.reply("Hedef kişi bulunamadı.");
 
-        if (!PROFILE_SKINS || typeof PROFILE_SKINS !== "object") {
-          return msg.reply("⚠️ Tema sistemi şu an tanımlı değil.");
-        }
-
-        const allSkins = Object.values(PROFILE_SKINS);
-        const skin =
-          allSkins.find(s => (s.key || s.id || "").toLowerCase() === keyInput) ||
-          allSkins.find(s => (s.shortKey || "").toLowerCase() === keyInput) ||
-          allSkins.find(s => (s.label || "").toLowerCase() === keyInput);
-
-        if (!skin) {
-          return msg.reply("⚠️ Geçerli bir tema anahtarı gir.\nListe için: `.profilskin liste`");
-        }
-
-        const key = skin.key || skin.id;
-        const nameLabel = skin.label || skin.name || key;
-        const price = skin.priceCrystal ?? skin.crystalPrice ?? 0;
-        const adminOnly = !!skin.adminOnly;
-
-        if (ownedSkins.includes(key)) {
-          return msg.reply(`✅ *${nameLabel}* temasına zaten sahipsin.\nAktif yapmak için: .profilskin set ${key}`);
-        }
-
-        if (adminOnly && !isAdmin) {
-          return msg.reply("🚫 Bu tema sadece yöneticiler içindir.");
-        }
-
-        if (price > 0 && player.crystals < price) {
-          return msg.reply(
-`🚫 Yetersiz kristal.
-
-Tema: ${nameLabel}
-Gerekli: ${price}
-Senin: ${player.crystals}
-
-Daha fazla kristal için:
-• Kutu aç
-• Etkinliklerde kristal buff yakala
-• Özel görevler (varsa)`
-          );
-        }
-
-        if (price > 0) {
-          player.crystals -= price;
-        }
-
-        // Tema satın alınıyor
-        if (!ownedSkins.includes(key)) {
-          ownedSkins.push(key);
-        }
-        cosmetics.ownedSkins = ownedSkins;
-        player.cosmetics = cosmetics;
-
-        // İlk defa tema alıyorsa otomatik aktif yap
-        if (!activeSkin || activeSkin === "default") {
-          cosmetics.activeSkin = key;
-        }
-
+        const targetPlayer = getPlayer(targetId, targetContact.pushname || targetContact.name || targetId);
+        player.stack -= amount;
+        targetPlayer.stack += amount;
         await saveDB();
 
         return msg.reply(
-`🎨 *Tema Satın Alındı!*
+`✅ Transfer tamamlandı.
+Gönderen: ${player.name || "-"}
+Alıcı: ${targetPlayer.name || "-"}
+Tutar: ${amount}
 
-Tema: ${nameLabel}
-Ödenen kristal: ${price}
-Kalan kristalin: ${player.crystals}
-
-Aktif tema: ${cosmetics.activeSkin || key}
-
-Profiline bakmak için:
-• .profil
-
-Aktif temayı değiştirmek için:
-• .profilskin set <anahtar>`
+Senin bakiye: ${player.stack}`
         );
       }
 
-      // Tema set etme
-      if (sub === "set" || sub === "sec" || sub === "seç") {
-        const keyInput = (parts[2] || "").toLowerCase();
-        if (!keyInput) {
-          return msg.reply(
-`Kullanım:
-• .profilskin set <tema_anahtarı>
-
-Tema listesini görmek için:
-• .profilskin liste`
-          );
-        }
-
-        if (!PROFILE_SKINS || typeof PROFILE_SKINS !== "object") {
-          return msg.reply("⚠️ Tema sistemi şu an tanımlı değil.");
-        }
-
-        const allSkins = Object.values(PROFILE_SKINS);
-        const skin =
-          allSkins.find(s => (s.key || s.id || "").toLowerCase() === keyInput) ||
-          allSkins.find(s => (s.shortKey || "").toLowerCase() === keyInput) ||
-          allSkins.find(s => (s.label || "").toLowerCase() === keyInput);
-
-        if (!skin) {
-          return msg.reply("⚠️ Geçerli bir tema anahtarı gir.\nListe için: `.profilskin liste`");
-        }
-
-        const key = skin.key || skin.id;
-        const nameLabel = skin.label || skin.name || key;
-        const adminOnly = !!skin.adminOnly;
-
-        if (!ownedSkins.includes(key)) {
-          if (adminOnly && isAdmin) {
-            // admin teması, admin isteyince direkt verebiliriz
-            ownedSkins.push(key);
-            cosmetics.ownedSkins = ownedSkins;
-          } else {
-            return msg.reply(
-`Bu temaya henüz sahip değilsin.
-
-Satın almak için:
-• .profilskin al ${key}
-
-Tema detayları için:
-• .profilskin liste`
-            );
-          }
-        }
-
-        if (adminOnly && !isAdmin) {
-          return msg.reply("🚫 Bu tema sadece yöneticiler için.");
-        }
-
-        cosmetics.activeSkin = key;
-        player.cosmetics = cosmetics;
+      if (base === ".bakiye" && args[1] === "reset") {
+        const mentions = await msg.getMentions();
+        if (!mentions || !mentions.length) return msg.reply("Kullanım: .bakiye reset @kişi");
+        const targetContact = mentions[0];
+        let tNumber = null;
+        try { tNumber = await targetContact.getNumber(); } catch {}
+        const targetId = tNumber ? normPhone(tNumber) : targetContact.id.user;
+        const targetPlayer = getPlayer(targetId, targetContact.pushname || targetContact.name || targetId);
+        targetPlayer.stack = STARTING_STACK;
         await saveDB();
-
-        return msg.reply(
-`✅ Aktif profil teması değiştirildi!
-
-Yeni tema: *${nameLabel}*
-
-Profiline bak:
-• .profil`
-        );
+        return msg.reply(`🔁 ${targetPlayer.name || "-"} bakiyesi sıfırlandı / başlangıca çekildi: ${STARTING_STACK}`);
       }
-
-      // Yanlış / bilinmeyen alt komut
-      return msg.reply(
-`🎨 *Profil Tema Komutları*
-
-• .profilskin liste
-   → Tüm temaları, fiyatlarını ve sahiplik durumunu gösterir.
-
-• .profilskin al <anahtar>
-   → Kristal ile yeni bir tema satın al.
-
-• .profilskin set <anahtar>
-   → Sahip olduğun temalardan birini aktif yap.
-
-Örnekler:
-• .profilskin liste
-• .profilskin al nadir
-• .profilskin set efsanevi`
-      );
     }
+
+    if (base === ".score") {
+      const allPlayers = Object.entries(db.data.players || {});
+      const sorted = allPlayers
+        .map(([id, p]) => [id, p])
+        .sort((a, b) => (b[1].stack || 0) - (a[1].stack || 0))
+        .slice(0, 10);
+      if (!sorted.length) return msg.reply("Henüz hiç oyuncu yok.");
+      const lines = sorted.map(([id, p], i) =>
+        `${i + 1}. ${p.name || id} — ${p.stack} çip`
+      ).join("\n");
+      return msg.reply(`🏆 *Skor Tablosu (İlk 10)*\n\n${lines}`);
+    }
+
   } catch (err) {
-    console.error("Ek komutlarda hata (.kristal / .profilskin):", err);
-    try { await msg.reply("⚠️ Tema/kristal komutunda iç hata oluştu, lütfen tekrar dene."); } catch {}
+    console.error("Mesaj işleme hatası:", err);
+    try { await msg.reply("⚠️ İç hata oluştu, lütfen tekrar dene."); } catch {}
   }
-});
-/* ===== OwO tarzı öğretici metni (GÜNCEL: kristal + profil temaları) ===== */
-const OWO_HELP =
-`🐾 *OwO Tarzı Oyun Sistemi Nedir?*
+}
 
-Bu bot, OwO tarzı bir *ekonomi ve mini oyun* sistemidir.
-Amaç: çip ve *kristal* biriktirmek, oyunlar oynayıp kazanmak,
-günlük görevleri tamamlayıp *unvanlar, petler ve profil temaları* toplamak. 💫
-
-🎮 *Temel Komutlar*
-• .join — Oyuna katıl, başlangıç çipini al
-• .bakiye — Bakiyeni ve aktif unvanını gör
-• .profil — Profilini, istatistiklerini ve temasını gör
-• .stats — Kişisel istatistiklerini gösterir
-• .stats all — Tüm oyuncuların global istatistiklerini gösterir
-• .seviye — Seviyeni ve XP ilerlemeni gör
-• .top seviye — En yüksek seviyedeki oyuncuları gör
-• .günlük — Günlük çip ödülünü al
-• .slot <miktar> — Slot makinesi oynarsın
-• .rulet <miktar> <seçim> — Rulet oynarsın (örn: .rulet 100 kırmızı)
-• .bj <miktar> — Blackjack oyunu başlatır
-• .hunt — Avlan, çip ve kutu bul (pet bonuslarıyla daha da güçlü)
-• .kutu — Elindeki kutuları aç
-• .kutu all — Tüm kutuları tek seferde aç
-• .görev — Bugüne özel rastgele 3 görevi gösterir
-• .unvan — Unvanlarını listele / seç
-• .pet — Pet sistemini ve petini yönet
-• .pet shop — Pet mağazasını gör
-• .pets — Tüm pet koleksiyonunu gör
-• .kristal — Kristal bakiyeni ve bozdurma oranını gör
-• .kristal bozdur <miktar|max> — Kristali çipe çevir
-• .profilskin liste — Profil teması mağazasını göster
-• .profilskin al <tema> — Kristalle yeni tema satın al
-• .profilskin set <tema> — Sahip olduğun temayı aktif yap
-• .owo — Bu rehberi tekrar gösterir
-
-💰 *Para Birimi ve Kristal Sistemi*
-• Ana para: *çip*
-• Nadir para: *kristal* 💎
-• Kristal genelde *kutu açarken* düşük ihtimalle düşer.
-• Etkinlik buff’ı açıkken, kristal düşme ihtimali de artar.
-• Kristalleri:
-  - Yeni petler almak için
-  - Özel / efsanevi petlere alternatif yol olarak
-  - Profil temaları satın almak için
-  - İstersen direkt çipe çevirmek için kullanabilirsin.
-
-• .kristal → Kristal bakiyeni ve oranı gösterir
-• .kristal bozdur 3 → 3 kristali çipe çevirir
-• .kristal bozdur max → Tüm kristallerini çipe çevirir
-
-🎨 *Profil Tema Sistemi*
-Profil ekranın artık *tema destekli*:
-
-• Temalar nadirliklere ayrılır:
-  - Normal
-  - Nadir
-  - Efsanevi
-  - 👑 Admin’e özel özel tema
-
-• Temalar kristal ile alınır:
-  - .profilskin liste → Tüm temaları ve kristal fiyatlarını gör
-  - .profilskin al <tema_anahtarı> → Tema satın al
-  - .profilskin set <tema_anahtarı> → Sahip olduğun temayı aktif yap
-• Admin teması sadece yöneticiler tarafından kullanılabilir.
-
-👤 *Profil Ekranı*
-• .profil ile:
-  - Adın, bakiye ve kristalin
-  - Aktif unvanın
-  - Aktif petin
-  - Genel istatistiklerin (slot, rulet, bj, hunt, kutu, günlük)
-  - Bugünkü görevlerin
-  - *Aktif profil teması* (tema sistemine uygun görünüm) gösterilir.
-
-🐾 *Pet Sistemi (Çoklu Pet)*
-Artık birden fazla pet alabilirsin.
-Her petin;
-• ATK (saldırı) → Hunt kazancını arttırır
-• LUCK (şans) → Kutu drop ve ödül bonusunu arttırır
-
-• Sadece *1 pet* aktif olur, gücünün %100’ü gelir.
-• Diğer tüm sahip olduğun petler toplam güce *%15* pasif katkı sağlar.
-• Petler hunt & kutu açtıkça XP kazanır (gelecekte seviye sistemi genişletilebilir).
-
-📦 *Kutu & Özel Pet Drop*
-• Kutu açtığında:
-  - Çip
-  - Pet bonuslu ekstra kazanç
-  - Etkinlik buff’ı varsa ekstra buff kazancı
-  - Nadir ihtimalle *kristal* ve *özel petler* kazanırsın.
-
-• Özel pet örnekleri:
-  - 🐢 Kaplumbağa (koleksiyon)
-  - 🐌 Salyangoz (hunt drop şansı)
-  - 🐨 Koala (30 dakikada bir pasif çip geliri)
-• Ayrıca bir *pity sistemi* vardır:
-  - Çok fazla kutu açıp hiç özel pet almamışsan,
-    sistem bir noktadan sonra garanti özel pet verebilir.
-
-📜 *Günlük Görevler*
-• .görev — Bugüne özel rastgele görevler:
-  - Slot oyna, blackjack oyna, hunt yap, kutu aç, günlük ödül al gibi
-• Görevler bitince otomatik çip ödülü gelir.
-
-🎖 *Unvan Sistemi*
-• Oynadıkça sistem seni takip eder ve otomatik unvan açarsın:
-  - 🆕 Yeni Maceracı
-  - 💰 Zengin Oyuncu
-  - 🎰 Slot Ustası
-  - 🎡 Rulet Ustası
-  - 🃏 Blackjack Efsanesi
-  - 🪶 Yeni Avcı / 🦴 Usta Avcı
-  - 🎁 Kutu Delisi
-  - 🐾 Pet Sahibi
-  - 📅 Sadık Oyuncu
-  - 🌀 OwO Efsanesi (birçok unvan açınca)
-  - 👑 Sunucu Lordu (admin’e özel)
-
-• .unvan — Unvanlarını listele
-• .unvan set <numara> — Aktif unvanını seç
-
-👑 *Yönetici Özel*
-• .pet adminkurt → Admin’e özel Alfa Kurt peti (ATK/LUCK 999)
-• .unvan admin → Admin’e özel Sunucu Lordu unvanı
-• Admin’e özel profil teması (tema mağazasında adminOnly)
-• .eventbuff → Hunt & kutu gelirlerini ve kristal drop oranını geçici olarak bufflar
-• .allpman / .alpman / .max / .listedenat vb. yönetici ekonomi & moderasyon komutları
-
-💡 *Günlük Rutin Önerisi*
-1) .join  (bir kereye mahsus)
-2) .günlük  (her gün çip al)
-3) .hunt / .slot / .rulet / .bj ile oyna
-4) .kutu veya .kutu all ile kutuları aç
-5) .kristal ile özel şeyler biriktir
-6) .profilskin liste → hoşuna giden temayı al, set et
-7) .unvan ile havalı unvanını seç
-8) .pet al / .pet shop / .pets ile koleksiyonunu büyüt 😎`;
+client.on("message", handleMessageSafe);
+client.initialize();
