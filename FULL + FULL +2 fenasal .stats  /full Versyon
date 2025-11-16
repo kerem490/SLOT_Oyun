@@ -2421,53 +2421,79 @@ Aktif unvanı değiştirmek için:
     if (base === ".bj" && args.length === 1) {
       return msg.reply(buildHelpText(isAdmin));
     }
+ 
+if (base === ".bj") {
+  const sub = (args[1] || "").toLowerCase();
 
-    if (base === ".bj") {
-      const sub = (args[1] || "").toLowerCase();
+  // 🔒 Yeni oyun açma kontrolü
+  const numericArg1 = parseInt(args[1], 10);
+  const isStartNewGame =
+    sub === "bet" ||                // .bj bet 1000
+    Number.isFinite(numericArg1);   // .bj 1000
 
-      if (sub === "bet") {
-        if (!(await requireJoined(msg, player))) return;
-        const bet = parseInt(args[2], 10);
-        if (!Number.isFinite(bet) || bet < MIN_BET) return msg.reply(`⚠️ Minimum bahis ${MIN_BET} çip.`);
-        if (player.locked) return msg.reply("🔒 Hesabın kilitli.");
-        if (player.stack < bet) return msg.reply("🚫 Yetersiz bakiye!");
+  if (isStartNewGame && games[keyGame]) {
+    return msg.reply(
+      "⚠️ Zaten devam eden bir blackjack oyunun var.\n" +
+      "Önce o oyunu `.hit`, `.stand`, `.db` veya `.sur` ile bitir."
+    );
+  }
 
-        const playerHand = [drawCard(), drawCard()];
-        const dealerHand = [drawCard(), drawCard()];
-        games[keyGame] = { bet, playerHand, dealerHand, canDouble: true, surrendered: false };
-        const val = getHandValue(playerHand);
+  // ---------- .bj bet <miktar> ----------
+  if (sub === "bet") {
+    if (!(await requireJoined(msg, player))) return;
 
-        return msg.reply(
+    const bet = parseInt(args[2], 10);
+    if (!Number.isFinite(bet) || bet < MIN_BET) {
+      return msg.reply(`⚠️ Minimum bahis ${MIN_BET} çip.`);
+    }
+    if (player.locked) return msg.reply("🔒 Hesabın kilitli.");
+    if (player.stack < bet) return msg.reply("🚫 Yetersiz bakiye!");
+
+    const playerHand = [drawCard(), drawCard()];
+    const dealerHand = [drawCard(), drawCard()];
+    games[keyGame] = {
+      bet,
+      playerHand,
+      dealerHand,
+      canDouble: true,
+      surrendered: false
+    };
+    const val = getHandValue(playerHand);
+
+    return msg.reply(
 `🎴 *BLACKJACK* 🎴
 
-⚡ *Hareket:* 🃏 Yeni Oyun Başladı
-
 🃏 *Dağıtıcı:* ${dealerHand[0].value}${suitDot(dealerHand[0].suit)} ❓
-📊 *Değer:* ?
+👤 *Sen:* ${handToDotString(playerHand)} — (${valueText(val)})
 
-👤 *.:* ${handToDotString(playerHand)}
-📊 *Değer:* ${valueText(val)}
-
-💵 *Bahis:* ${bet} 💰
-🏦 *Bakiye:* ${player.stack} 💰
-
+💵 *Bahis:* ${bet}
 ➡️ Komutlar: .hit | .stand | .db | .sur`
-        );
-      }
+    );
+  }
 
-      const maybeBet = parseInt(args[1], 10);
-      if (Number.isFinite(maybeBet)) {
-        if (!(await requireJoined(msg, player))) return;
-        if (maybeBet < MIN_BET) return msg.reply(`⚠️ Minimum bahis ${MIN_BET} çip.`);
-        if (player.locked) return msg.reply("🔒 Hesabın kilitli.");
-        if (player.stack < maybeBet) return msg.reply("🚫 Yetersiz bakiye!");
+  // ---------- .bj <miktar> ----------
+  const maybeBet = numericArg1;
+  if (Number.isFinite(maybeBet)) {
+    if (!(await requireJoined(msg, player))) return;
 
-        const playerHand = [drawCard(), drawCard()];
-        const dealerHand = [drawCard(), drawCard()];
-        games[keyGame] = { bet: maybeBet, playerHand, dealerHand, canDouble: true, surrendered: false };
-        const val = getHandValue(playerHand);
+    if (maybeBet < MIN_BET) {
+      return msg.reply(`⚠️ Minimum bahis ${MIN_BET} çip.`);
+    }
+    if (player.locked) return msg.reply("🔒 Hesabın kilitli.");
+    if (player.stack < maybeBet) return msg.reply("🚫 Yetersiz bakiye!");
 
-        return msg.reply(
+    const playerHand = [drawCard(), drawCard()];
+    const dealerHand = [drawCard(), drawCard()];
+    games[keyGame] = {
+      bet: maybeBet,
+      playerHand,
+      dealerHand,
+      canDouble: true,
+      surrendered: false
+    };
+    const val = getHandValue(playerHand);
+
+   return msg.reply(
 `🎴 *BLACKJACK* 🎴
 
 ⚡ *Hareket:* 🃏 Yeni Oyun Başladı
@@ -2482,63 +2508,12 @@ Aktif unvanı değiştirmek için:
 🏦 *Bakiye:* ${player.stack} 💰
 
 ➡️ Komutlar: .hit | .stand | .db | .sur`
-        );
-      }
+  );
 
-      if (["admin","admin?","whoami","send","kilit","unlock","kick","skorreset","bakiyereset"].includes(sub)) {
-        if (!isAdmin) return msg.reply("🚫 Bu komut için yetkin yok.");
+  }
+}
 
-        if (sub === "admin" || sub === "admin?") return msg.reply(`👑 Admin tanındı.`);
-        if (sub === "whoami") return msg.reply(`🧪 İsim: ${player.name || "-"} | joined=${player.joined} | Anahtar: ${makeGameKey(msg, s)}`);
-
-        if (sub === "send") {
-          await adminSendFunds(msg, player, args.slice(2), isAdmin);
-          return;
-        }
-
-        if (sub === "kilit") {
-          const targets = await extractMentionedIds(msg);
-          if (!targets.length) return msg.reply("⚠️ @kişi belirt.");
-          targets.forEach(tid => { const tp = getPlayer(tid, db.data.players[tid]?.name || tid); tp.locked = true; });
-          await saveDB();
-          return msg.reply("🔒 Belirtilen oyuncular kilitlendi.");
-        }
-
-        if (sub === "unlock") {
-          const targets = await extractMentionedIds(msg);
-          if (!targets.length) return msg.reply("⚠️ @kişi belirt.");
-          targets.forEach(tid => { const tp = getPlayer(tid, db.data.players[tid]?.name || tid); tp.locked = false; });
-          await saveDB();
-          return msg.reply("🔓 Kilitler açıldı.");
-        }
-
-        if (sub === "kick") {
-          const targets = await extractMentionedIds(msg);
-          if (!targets.length) return msg.reply("⚠️ @kişi belirt.");
-          targets.forEach(tid => { delete db.data.players[tid]; });
-          await saveDB();
-          return msg.reply("🗑️ Oyuncu(lar) sistemden silindi.");
-        }
-
-        if (sub === "skorreset") {
-          db.data.players = {};
-          await saveDB();
-          return msg.reply("♻️ Tüm skor ve veriler sıfırlandı.");
-        }
-
-        if (sub === "bakiyereset") {
-          const tgt = await resolveSingleTarget(msg);
-          if (!tgt.ok) return msg.reply(tgt.message);
-          const tid = tgt.id;
-          const tp = getPlayer(tid, db.data.players[tid]?.name || tid);
-          tp.stack = 0;
-          await saveDB();
-          return msg.reply(`🧰 ${tp.name || tid} için bakiye *0* yapıldı.`);
-        }
-      }
-    }
-
-    if (base === ".hit") {
+      if (base === ".hit") {
       const game = games[makeGameKey(msg, s)];
       if (!game) return;
       if (player.locked) return msg.reply("🔒 Hesabın kilitli.");
