@@ -1080,13 +1080,14 @@ async function isGroupAdminByMsg(msg) {
   return { isGroup: true, isGroupAdmin, chat };
 }
 /* ===== Grup bazlı bot aç/kapa (.botkapat / .botaç) ===== */
+/* ===== Grup bazlı bot aç/kapa (.botkapat / .botaç) ===== */
 async function handleGroupMute(msg, body) {
   await db.read();
   if (!db.data) db.data = { players: {}, groupSettings: {} };
   if (!db.data.groupSettings) db.data.groupSettings = {};
 
   const chat = await msg.getChat();
-  if (!chat.isGroup) return false; // yalnızca gruplarda çalışsın
+  if (!chat.isGroup) return false; // sadece gruplarda geçerli
 
   const chatId = chat.id._serialized;
   const text = (body || "").trim().toLowerCase();
@@ -1094,12 +1095,23 @@ async function handleGroupMute(msg, body) {
   const isDisableCmd = text === ".botkapat";
   const isEnableCmd  = (text === ".botaç" || text === ".botac");
 
-  // Bu grup için kayıt yoksa varsayılan: açık
+  // Grup için kayıt yoksa varsayılan: açık
   if (!db.data.groupSettings[chatId]) {
     db.data.groupSettings[chatId] = { disabled: false };
   }
 
   const groupCfg = db.data.groupSettings[chatId];
+
+  // ❗ Sadece bot adminleri .botkapat / .botaç kullanabilsin
+  if (isDisableCmd || isEnableCmd) {
+    const senderInfo = await resolveSender(msg);   // telefon / lid bilgisi
+    const isAdmin = isAdminCheck(senderInfo);      // SENİN admin sistemin (ADMIN_PHONES + admins.json)
+
+    if (!isAdmin) {
+      await msg.reply("⛔ Bu komutu yalnızca *bot adminleri* kullanabilir.");
+      return true; // Mesaj burada bitsin, başka komut çalışmasın
+    }
+  }
 
   // Bu grupta botu kapat
   if (isDisableCmd) {
@@ -1108,7 +1120,7 @@ async function handleGroupMute(msg, body) {
     await saveDB();
 
     await msg.reply("🔕 *Bu grupta bot devre dışı bırakıldı.*\n`.botaç` yazarak tekrar açabilirsin.");
-    return true; // Bu mesaj için başka hiçbir komut çalışmasın
+    return true;
   }
 
   // Bu grupta botu aç
@@ -1121,7 +1133,7 @@ async function handleGroupMute(msg, body) {
     return true;
   }
 
-  // Grup kapalıysa tüm komutları sustur
+  // Grup kapalıysa tüm komutlar susturulsun
   if (groupCfg.disabled) {
     return true;
   }
@@ -1164,6 +1176,8 @@ const adminPart =
 `\n\n👑 *Yönetici Komutları*
 • .allpman — Herkese +5000
 • .alpman — Kendine +15000
+• .botkapat — Bulunduğun grupta botu susturur (sadece bot admini)
+• .botaç / .botac — Susturulan botu o grupta tekrar açar (sadece bot admini)
 • .max — Kendine 999999999999 çip ekler
 • .listedenat @kişi — Skordan çıkar
 • .bakiye reset @kişi — 0 yap
