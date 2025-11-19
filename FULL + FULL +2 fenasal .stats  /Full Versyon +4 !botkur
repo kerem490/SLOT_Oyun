@@ -1079,7 +1079,7 @@ async function isGroupAdminByMsg(msg) {
   );
   return { isGroup: true, isGroupAdmin, chat };
 }
-/* ===== Grup bazlı bot aç/kapa ve kurulum (!botkur / !bot kur / .botkapat / .botaç) ===== */
+/* ===== Grup bazlı bot aç/kapa ve kurulum (!botkur / .botkapat / .botaç / .bot aç / .bot kapat) ===== */
 async function handleGroupMute(msg, body) {
   await db.read();
   if (!db.data) db.data = { players: {}, groupSettings: {} };
@@ -1091,8 +1091,8 @@ async function handleGroupMute(msg, body) {
   const chatId = chat.id._serialized;
   const text = (body || "").trim().toLowerCase();
 
-  const isDisableCmd = text === ".botkapat";
-  const isEnableCmd  = (text === ".botaç" || text === ".botac");
+  const isDisableCmd = (text === ".botkapat" || text === ".bot kapat");
+  const isEnableCmd  = (text === ".botaç" || text === ".bot aç");
   // İKİSİ BİRDEN ÇALIŞSIN: !botkur VE !bot kur
   const isSetupCmd   = (text === "!botkur" || text === "!bot kur");
 
@@ -1105,10 +1105,10 @@ async function handleGroupMute(msg, body) {
   if (typeof groupCfg.disabled !== "boolean")  groupCfg.disabled  = true;
   if (typeof groupCfg.installed !== "boolean") groupCfg.installed = false;
 
-  // ❗ Sadece bot adminleri bu üç komutu kullanabilsin
+  // ❗ Sadece bot adminleri bu komutları kullanabilsin
   if (isDisableCmd || isEnableCmd || isSetupCmd) {
     const senderInfo = await resolveSender(msg);   // telefon / lid bilgisi
-    const isAdmin = isAdminCheck(senderInfo);      // SENİN admin sistemin (ADMIN_PHONES + admins.json)
+    const isAdmin = isAdminCheck(senderInfo);      // SENİN admin sistemin
 
     if (!isAdmin) {
       await msg.reply("⛔ Bu komutu yalnızca *bot adminleri* kullanabilir.");
@@ -1116,15 +1116,8 @@ async function handleGroupMute(msg, body) {
     }
   }
 
-  // !botkur / !bot kur → bu grupta botu KUR ve AÇ
+  // !botkur → bu grupta botu KUR ve AÇ (zaten kuruluysa da sorun yok, yine açar)
   if (isSetupCmd) {
-    // Eğer zaten kurulmuşsa uyarı ver
-    if (groupCfg.installed) {
-      await msg.reply("ℹ️ *Bu grupta bot zaten kurulmuş.*");
-      return true;
-    }
-
-    // İlk kez kurulum
     groupCfg.installed = true;
     groupCfg.disabled = false;
     db.data.groupSettings[chatId] = groupCfg;
@@ -1134,22 +1127,36 @@ async function handleGroupMute(msg, body) {
     return true;
   }
 
-  // .botkapat → sadece o grupta botu sustur
+  // .botkapat / .bot kapat → botu kapat
   if (isDisableCmd) {
+    if (!groupCfg.installed) {
+      await msg.reply("ℹ️ Bu grupta bot henüz kurulmamış.");
+      return true;
+    }
+    if (groupCfg.disabled) {
+      await msg.reply("ℹ️ Bu grupta bot zaten kapalı.");
+      return true;
+    }
+
     groupCfg.disabled = true;
     db.data.groupSettings[chatId] = groupCfg;
     await saveDB();
 
     await msg.reply("🔕 *Bu grupta bot devre dışı bırakıldı.*");
     return true;
-}
+  }
 
-  // .botaç / .botac → bot kurulmuşsa tekrar aç
+  // .botaç / .bot aç → botu aç
   if (isEnableCmd) {
     if (!groupCfg.installed) {
       await msg.reply("ℹ️ Bu grupta bot henüz kurulmamış.");
       return true;
     }
+    if (!groupCfg.disabled) {
+      await msg.reply("ℹ️ Bu grupta bot zaten aktif.");
+      return true;
+    }
+
     groupCfg.disabled = false;
     db.data.groupSettings[chatId] = groupCfg;
     await saveDB();
@@ -1157,6 +1164,8 @@ async function handleGroupMute(msg, body) {
     await msg.reply("✅ *Bu grupta bot yeniden aktif!*");
     return true;
   }
+
+  // --- Buradan sonrası: normal mesajlar için kontrol ---
 
   // Grup için bot KURULMAMIŞSA → hiçbir komut işlem görmesin
   if (!groupCfg.installed) {
@@ -1207,8 +1216,8 @@ const adminPart =
 • .allpman — Herkese +5000
 • .alpman — Kendine +15000
 • !bot kur / !botkur — Bu grupta botu kurar ve aktifleştirir (sadece bot admini)
-• .botkapat — Bulunduğun grupta botu susturur (sadece bot admini)
-• .botaç / .botac — Susturulan botu o grupta tekrar açar (sadece bot admini)
+• .bot kapat / .botkapat — Bulunduğun grupta botu susturur (sadece bot admini)
+• .bot aç / .botaç — Susturulan botu o grupta tekrar açar (sadece bot admini)
 • .max — Kendine 999999999999 çip ekler
 • .listedenat @kişi — Skordan çıkar
 • .bakiye reset @kişi — 0 yap
