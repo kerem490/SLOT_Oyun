@@ -1079,7 +1079,7 @@ async function isGroupAdminByMsg(msg) {
   );
   return { isGroup: true, isGroupAdmin, chat };
 }
-/* ===== Grup bazlı bot aç/kapa ve kurulum (!botkur / .botkapat / .botaç) ===== */
+/* ===== Grup bazlı bot aç/kapa ve kurulum (!botkur / !bot kur / .botkapat / .botaç) ===== */
 async function handleGroupMute(msg, body) {
   await db.read();
   if (!db.data) db.data = { players: {}, groupSettings: {} };
@@ -1093,7 +1093,8 @@ async function handleGroupMute(msg, body) {
 
   const isDisableCmd = text === ".botkapat";
   const isEnableCmd  = (text === ".botaç" || text === ".botac");
-  const isSetupCmd   = text === "!botkur";
+  // İKİSİ BİRDEN ÇALIŞSIN: !botkur VE !bot kur
+  const isSetupCmd   = (text === "!botkur" || text === "!bot kur");
 
   // Grup için kayıt yoksa varsayılan: "kurulmamış ve kapalı"
   if (!db.data.groupSettings[chatId]) {
@@ -1115,38 +1116,38 @@ async function handleGroupMute(msg, body) {
     }
   }
 
-  // !botkur → bu grupta botu KUR ve aç
+  // !botkur / !bot kur → bu grupta botu KUR ve AÇ
   if (isSetupCmd) {
+    // Eğer zaten kurulmuşsa uyarı ver
+    if (groupCfg.installed) {
+      await msg.reply("ℹ️ *Bu grupta bot zaten kurulmuş.*");
+      return true;
+    }
+
+    // İlk kez kurulum
     groupCfg.installed = true;
     groupCfg.disabled = false;
     db.data.groupSettings[chatId] = groupCfg;
     await saveDB();
 
-    await msg.reply(
-      "✅ *Bu grupta bot kuruldu ve aktifleştirildi.*\n" +
-      "• Susturmak için: `.botkapat`\n" +
-      "• Tekrar açmak için: `.botaç`"
-    );
+    await msg.reply("✅ *Bot bu grupta kuruldu ve aktifleştirildi.*");
     return true;
   }
 
-  // Bu grupta bot hiç kurulmamışsa, .botkapat ve .botaç da çalışmasın
+  // .botkapat → sadece o grupta botu sustur
   if (isDisableCmd) {
-    if (!groupCfg.installed) {
-      await msg.reply("ℹ️ Bu grupta bot henüz kurulmamış. Önce `!botkur` yaz.");
-      return true;
-    }
     groupCfg.disabled = true;
     db.data.groupSettings[chatId] = groupCfg;
     await saveDB();
 
-    await msg.reply("🔕 *Bu grupta bot devre dışı bırakıldı.*\n`.botaç` yazarak tekrar açabilirsin.");
+    await msg.reply("🔕 *Bu grupta bot devre dışı bırakıldı.*");
     return true;
-  }
+}
 
+  // .botaç / .botac → bot kurulmuşsa tekrar aç
   if (isEnableCmd) {
     if (!groupCfg.installed) {
-      await msg.reply("ℹ️ Bu grupta bot henüz kurulmamış. Önce `!botkur` yaz.");
+      await msg.reply("ℹ️ Bu grupta bot henüz kurulmamış.");
       return true;
     }
     groupCfg.disabled = false;
@@ -1159,7 +1160,6 @@ async function handleGroupMute(msg, body) {
 
   // Grup için bot KURULMAMIŞSA → hiçbir komut işlem görmesin
   if (!groupCfg.installed) {
-    // İstersen burada bilerek sessiz kalıyoruz. (true döndüğü için aşağıya inmez)
     return true;
   }
 
@@ -1168,10 +1168,9 @@ async function handleGroupMute(msg, body) {
     return true;
   }
 
-  // Bot kurulmuş ve açık → diğer komutlar çalışabilir
+  // Bot bu grupta kurulu ve açık → diğer komutlar çalışabilir
   return false;
 }
-
 /* ========== Yardım metni ========== */
 function buildHelpText(isAdmin) {
   const userPart =
@@ -1207,7 +1206,7 @@ const adminPart =
 `\n\n👑 *Yönetici Komutları*
 • .allpman — Herkese +5000
 • .alpman — Kendine +15000
-• !botkur — Bu grupta botu kurar ve aktifleştirir (sadece bot admini)
+• !bot kur / !botkur — Bu grupta botu kurar ve aktifleştirir (sadece bot admini)
 • .botkapat — Bulunduğun grupta botu susturur (sadece bot admini)
 • .botaç / .botac — Susturulan botu o grupta tekrar açar (sadece bot admini)
 • .max — Kendine 999999999999 çip ekler
