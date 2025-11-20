@@ -1070,116 +1070,97 @@ function handToDotString(hand) { return hand.map(c => `${c.value}${suitDot(c.sui
 function valueText(val) { return (val > 21) ? "BUST! 💥" : String(val); }
 
 /* ===== Grup yardımcıları ===== */
-async function isGroupAdminByMsg(msg) {
-  const chat = await msg.getChat();
-  if (!chat.isGroup) return { isGroup: false, isGroupAdmin: false, chat };
-  const senderId = msg.author || (await msg.getContact())?.id?._serialized;
-  const isGroupAdmin = (chat.participants || []).some(p =>
-    p.isAdmin && (p.id?._serialized === senderId)
-  );
-  return { isGroup: true, isGroupAdmin, chat };
-}
-/* ===== Grup bazlı bot aç/kapa ve kurulum (!botkur / .botkapat / .botaç / .bot aç / .bot kapat) ===== */
 async function handleGroupMute(msg, body) {
-  await db.read();
   if (!db.data) db.data = { players: {}, groupSettings: {} };
   if (!db.data.groupSettings) db.data.groupSettings = {};
 
   const chat = await msg.getChat();
-  if (!chat.isGroup) return false; // sadece gruplarda geçerli
+  if (!chat.isGroup) return false; // Özel sohbette asla engelleme
 
   const chatId = chat.id._serialized;
   const text = (body || "").trim().toLowerCase();
 
   const isDisableCmd = (text === ".botkapat" || text === ".bot kapat");
   const isEnableCmd  = (text === ".botaç" || text === ".bot aç");
-  // İKİSİ BİRDEN ÇALIŞSIN: !botkur VE !bot kur
   const isSetupCmd   = (text === "!botkur" || text === "!bot kur");
 
-  // Grup için kayıt yoksa varsayılan: "kurulmamış ve kapalı"
+  // Bu grup ilk kez görülüyorsa → bot otomatik kurulu ve açık olsun
   if (!db.data.groupSettings[chatId]) {
-    db.data.groupSettings[chatId] = { disabled: true, installed: false };
+    db.data.groupSettings[chatId] = {
+      installed: true,  // bot kurulmuş kabul edeceğiz
+      disabled: false   // bot açık
+    };
+    await saveDB();
   }
 
   const groupCfg = db.data.groupSettings[chatId];
-  if (typeof groupCfg.disabled !== "boolean")  groupCfg.disabled  = true;
-  if (typeof groupCfg.installed !== "boolean") groupCfg.installed = false;
 
-  // ❗ Sadece bot adminleri bu komutları kullanabilsin
+  // admin kontrolü
+  const senderInfo = await resolveSender(msg);
+  const isAdmin = isAdminCheck(senderInfo);
+
+  // --- YALNIZCA 3 özel komutu kontrol edeceğiz ---
   if (isDisableCmd || isEnableCmd || isSetupCmd) {
-    const senderInfo = await resolveSender(msg);   // telefon / lid bilgisi
-    const isAdmin = isAdminCheck(senderInfo);      // SENİN admin sistemin
-
     if (!isAdmin) {
-      await msg.reply("⛔ Bu komutu yalnızca *bot adminleri* kullanabilir.");
-      return true; // Mesaj burada bitsin, başka komut çalışmasın
+      await msg.reply("⛔ Bu komutu sadece *bot adminleri* kullanabilir.");
+      return true; 
     }
   }
 
-  // !botkur → bu grupta botu KUR ve AÇ (zaten kuruluysa da sorun yok, yine açar)
+  // kurul komutu
   if (isSetupCmd) {
     groupCfg.installed = true;
     groupCfg.disabled = false;
-    db.data.groupSettings[chatId] = groupCfg;
     await saveDB();
-
-    await msg.reply("✅ *Bot bu grupta kuruldu ve aktifleştirildi.*");
+    await msg.reply("📌 Bot bu grupta başarıyla kuruldu ve aktifleştirildi.");
     return true;
   }
 
-  // .botkapat / .bot kapat → botu kapat
+  // kapatma komutu
   if (isDisableCmd) {
     if (!groupCfg.installed) {
-      await msg.reply("ℹ️ Bu grupta bot henüz kurulmamış.");
+      await msg.reply("ℹ️ Bot bu grupta daha önce kurulmamış.");
       return true;
     }
     if (groupCfg.disabled) {
-      await msg.reply("ℹ️ Bu grupta bot zaten kapalı.");
+      await msg.reply("ℹ️ Bot zaten kapalı.");
       return true;
     }
 
     groupCfg.disabled = true;
-    db.data.groupSettings[chatId] = groupCfg;
     await saveDB();
-
-    await msg.reply("🔕 *Bu grupta bot devre dışı bırakıldı.*");
+    await msg.reply("🔕 Bot bu grupta kapatıldı.");
     return true;
   }
 
-  // .botaç / .bot aç → botu aç
+  // açma komutu
   if (isEnableCmd) {
     if (!groupCfg.installed) {
-      await msg.reply("ℹ️ Bu grupta bot henüz kurulmamış.");
+      await msg.reply("ℹ️ Bot bu grupta kurulmamış.");
       return true;
     }
     if (!groupCfg.disabled) {
-      await msg.reply("ℹ️ Bu grupta bot zaten aktif.");
+      await msg.reply("ℹ️ Bot zaten açık.");
       return true;
     }
 
     groupCfg.disabled = false;
-    db.data.groupSettings[chatId] = groupCfg;
     await saveDB();
-
-    await msg.reply("✅ *Bu grupta bot yeniden aktif!*");
+    await msg.reply("🟢 Bot bu grupta yeniden aktif.");
     return true;
   }
 
-  // --- Buradan sonrası: normal mesajlar için kontrol ---
-
-  // Grup için bot KURULMAMIŞSA → hiçbir komut işlem görmesin
-  if (!groupCfg.installed) {
-    return true;
-  }
-
-  // Grup için bot kurulmuş ama KAPALIYSA → yine hiçbir komut işlem görmesin
+  // --- buradan sonrası tüm diğer komutlar için ---
+  // Bot kurulmuş ama kapalıysa → hiçbir komut çalışmasın
   if (groupCfg.disabled) {
     return true;
   }
 
-  // Bot bu grupta kurulu ve açık → diğer komutlar çalışabilir
+  // bot açık → komutlar normal çalışsın
   return false;
 }
+
+
 /* ========== Yardım metni ========== */
 function buildHelpText(isAdmin) {
   const userPart =
@@ -2987,11 +2968,15 @@ Kazanç: +${gain} çip${extra}
       );
     }
 
+    
+    // TEK KUTU AÇMA FONKSİYONU (DB YAZMAZ, SADECE PLAYER'İ GÜNCELLER)
+     // TEK KUTU AÇMA FONKSİYONU
     async function openOneBox(player, forAll) {
       ensureStats(player);
       ensureInventory(player);
       ensurePet(player);
 
+      // 🔴 HER KUTU AÇIŞINDA 1 TANE EKSİLİYOR
       player.inv.boxes -= 1;
       player.stats.boxesOpened += 1;
 
@@ -3029,7 +3014,6 @@ Kazanç: +${gain} çip${extra}
       }
 
       player.stack += reward;
-      player.stats.boxesOpened = player.stats.boxesOpened || 0;
       applyQuestProgress(player, "boxOpen", 1);
       gainPetXP(player, 5);
 
@@ -3037,7 +3021,7 @@ Kazanç: +${gain} çip${extra}
       let droppedType = null;
 
       const alreadyHasSpecial = (player.pets || []).some(p =>
-        ["kaplumbaga","salyangoz","koala"].includes(p.type)
+        ["kaplumbaga", "salyangoz", "koala"].includes(p.type)
       );
 
       let forced = false;
@@ -3046,7 +3030,7 @@ Kazanç: +${gain} çip${extra}
       }
 
       if (forced) {
-        const pool = ["kaplumbaga","salyangoz","koala"];
+        const pool = ["kaplumbaga", "salyangoz", "koala"];
         const type = pool[Math.floor(Math.random() * pool.length)];
         const pet = grantPet(player, type);
         if (pet) {
@@ -3063,9 +3047,7 @@ Kazanç: +${gain} çip${extra}
           acc += rate;
           if (r < acc) {
             const pet = grantPet(player, type);
-            if (pet) {
-              droppedType = type;
-            }
+            if (pet) droppedType = type;
             break;
           }
         }
@@ -3082,6 +3064,7 @@ Kazanç: +${gain} çip${extra}
         }
       }
 
+      // 🔴 ÇOK ÖNEMLİ: DEĞİŞİKLİKLERİN DOSYAYA YAZILMASI
       await saveDB();
       await checkAndUnlockTitles(null, player).catch(() => {});
 
@@ -3095,34 +3078,37 @@ Kazanç: +${gain} çip${extra}
       };
     }
 
-    if (base === ".kutu" || base === ".box") {
-      if (!(await requireJoined(msg, player))) return;
-      if (player.locked) return msg.reply("🔒 Hesabın kilitli.");
 
-      ensureStats(player);
-      ensureInventory(player);
-      ensurePet(player);
 
-      const sub = (args[1] || "").toLowerCase();
+     if (base === ".kutu" || base === ".box") {
+  if (!(await requireJoined(msg, player))) return;
+  if (player.locked) return msg.reply("🔒 Hesabın kilitli.");
 
-      if ((sub === "all" || sub === "hepsi") && player.inv.boxes > 0) {
-        const totalBoxes = player.inv.boxes;
-        let totalReward = 0;
-        let totalPetBonus = 0;
-        let totalBuffBonus = 0;
-        let anySpecialMsg = "";
+  ensureStats(player);
+  ensureInventory(player);
+  ensurePet(player);
 
-        for (let i = 0; i < totalBoxes; i++) {
-          const res = await openOneBox(player, true);
-          totalReward += res.reward;
-          totalPetBonus += res.petBonus || 0;
-          totalBuffBonus += res.buffBonus || 0;
-          if (res.specialPetMessage) {
-            anySpecialMsg += res.specialPetMessage;
-          }
-        }
+  const sub = (args[1] || "").toLowerCase();
 
-        return msg.reply(
+  // 🔴 TÜM KUTULARI AÇAN KISIM
+  if ((sub === "all" || sub === "hepsi") && player.inv.boxes > 0) {
+    const totalBoxes = player.inv.boxes;   // BAŞTAKİ KUTU SAYISI
+    let totalReward = 0;
+    let totalPetBonus = 0;
+    let totalBuffBonus = 0;
+    let anySpecialMsg = "";
+
+    for (let i = 0; i < totalBoxes; i++) {
+      const res = await openOneBox(player, true);
+      totalReward += res.reward;
+      totalPetBonus += res.petBonus || 0;
+      totalBuffBonus += res.buffBonus || 0;
+      if (res.specialPetMessage) {
+        anySpecialMsg += res.specialPetMessage;
+      }
+    }
+
+    return msg.reply(
 `🎁 *TÜM KUTULAR AÇILDI* 🎁
 
 Açılan kutu: ${totalBoxes}
@@ -3131,34 +3117,36 @@ Toplam kazanç: +${totalReward} çip
 ⚡ Buff bonusu: +${totalBuffBonus} çip
 Kalan kutu: ${player.inv.boxes}
 🏦 Bakiye: ${player.stack}${anySpecialMsg || ""}`
-        );
-      }
+    );
+  }
 
-      if (player.inv.boxes <= 0) {
-        return msg.reply("🎁 Hiç kutun yok. .hunt yaparak kutu bulabilirsin.");
-      }
+  // 🔴 HİÇ KUTU YOKSA
+  if (player.inv.boxes <= 0) {
+    return msg.reply("🎁 Hiç kutun yok. .hunt yaparak kutu bulabilirsin.");
+  }
 
-      const res = await openOneBox(player, false);
+  // 🔴 TEK KUTU AÇMA
+  const res = await openOneBox(player, false);
 
-      let petLine = "";
-      if (res.petBonus > 0) {
-        petLine = `\n🐾 Pet bonusu: +${res.petBonus} çip`;
-      }
+  let petLine = "";
+  if (res.petBonus > 0) {
+    petLine = `\n🐾 Pet bonusu: +${res.petBonus} çip`;
+  }
 
-      let buffLine = "";
-      if (res.buffBonus > 0) {
-        buffLine = `\n${res.buffLine}`;
-      }
+  let buffLine = "";
+  if (res.buffBonus > 0) {
+    buffLine = `\n${res.buffLine}`;
+  }
 
-      return msg.reply(
+  return msg.reply(
 `🎁 *KUTU AÇILDI* 🎁
 
 ${res.flavor}
 Kazanç: +${res.reward} çip${petLine}${buffLine}
 Kalan kutu: ${player.inv.boxes}
 🏦 Bakiye: ${player.stack}${res.specialPetMessage || ""}`
-      );
-    }
+  );
+}
 
     if (base === ".slot") {
   // 🔁 Slot anti-spam (3 saniye)
