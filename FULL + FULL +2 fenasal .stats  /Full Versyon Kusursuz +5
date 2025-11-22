@@ -1113,9 +1113,17 @@ async function handleGroupMute(msg, body) {
     groupCfg.installed = true;
     groupCfg.disabled = false;
     await saveDB();
-    await msg.reply("📌 Bot bu grupta başarıyla kuruldu ve aktifleştirildi.");
+    await msg.reply(
+`🛡️ Bot bu grupta başarıyla kuruldu!
+
+🎮 Oyun komutları artık bu grupta aktif:
+• .join, .slot, .bj, .rulet, .hunt, .kutu, .günlük, .profil, .stats ...
+
+ℹ️ Not: !everyone, !kilit ve !kilitaç komutları bot kapalı olsa bile çalışır.`
+    );
     return true;
   }
+
 
   // kapatma komutu
   if (isDisableCmd) {
@@ -1863,6 +1871,8 @@ ${lines}
         return msg.reply("🚫 Bu komut için grup yöneticisi olmalısın (ya da bot admini).");
       }
 
+      const sub = (args[1] || "").toLowerCase();
+
       if (base === "!everyone") {
         try {
           const participants = chat.participants || [];
@@ -1881,7 +1891,12 @@ ${lines}
         return;
       }
 
-      if (base === "!kilit") {
+      // !kilit aç / !kilit ac yazılırsa → AÇMA komutu gibi çalışsın
+      const wantsUnlockViaSplit =
+        base === "!kilit" && (sub === "aç" || sub === "ac");
+
+      // KİLİTLE
+      if (base === "!kilit" && !wantsUnlockViaSplit) {
         try {
           await chat.setMessagesAdminsOnly(true);
           await msg.reply("🔒 Grup *sadece yöneticilere* kilitlendi.");
@@ -1892,7 +1907,8 @@ ${lines}
         return;
       }
 
-      if (base === "!kilitaç" || base === "!kilitac") {
+      // KİLİT AÇ (hem !kilitaç / !kilitac, hem de !kilit aç)
+      if (base === "!kilitaç" || base === "!kilitac" || wantsUnlockViaSplit) {
         try {
           await chat.setMessagesAdminsOnly(false);
           await msg.reply("🔓 Grup yeniden *herkese* açıldı.");
@@ -1903,7 +1919,6 @@ ${lines}
         return;
       }
     }
-
     if (base === ".join") {
       if (player.joined) {
         const activeTitleName = getActiveTitleName(player);
